@@ -49,4 +49,7 @@ setup:
 dev:
 	bear -- $(MAKE) debug
 
-.PHONY: clean setup dev test-%
+format:
+	@fd -ec -eh . -x clang-format -i {}
+
+.PHONY: clean setup dev format test-%
