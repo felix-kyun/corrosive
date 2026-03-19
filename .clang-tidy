@@ -1,3 +1,4 @@
+# vim: ft=yaml
 Checks: >
   clang-diagnostic-*,
   clang-analyzer-*,
@@ -8,6 +9,6 @@ Checks: >
   portability-*,
   readability-*
 
-WarningsAsErrors: ''
-HeaderFilterRegex: '^(src|include)/.*'
+WarningsAsErrors: ""
+HeaderFilterRegex: "^(src|include)/.*"
 FormatStyle: file
