@@ -2,7 +2,7 @@
     cr_log.h - v0.1.0 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
-    Repo:     https://github.com/felix-kyun/corrosive
+    Repo:     https://github.com/felix-kyun/shl
 
     SPDX-License-Identifier: MIT
     Copyright (c) 2026 Praise Jacob
@@ -12,6 +12,25 @@
 
 #ifndef CR_LOG_H
 #define CR_LOG_H
+
+#include <stdint.h>
+
+typedef enum log_level_t : uint8_t {
+    LOG_TRACE,
+    LOG_DEBUG,
+    LOG_INFO,
+    LOG_WARN,
+    LOG_ERROR,
+    LOG_FATAL,
+    LOG_LEVEL_COUNT,
+} log_level_t;
+
+void cr_log_init(int* argc, char*** argv);
+void cr_log_set_level(log_level_t level);
+void cr_log_free();
+
+[[noreturn, gnu::format(__printf__, 2, 3)]]
+void cr_log(log_level_t level, const char* fmt, ...);
 
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
