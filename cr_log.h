@@ -14,25 +14,82 @@
 #define CR_LOG_H
 
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-typedef enum log_level_t : uint8_t {
-    LOG_TRACE,
-    LOG_DEBUG,
-    LOG_INFO,
-    LOG_WARN,
-    LOG_ERROR,
-    LOG_FATAL,
-    LOG_LEVEL_COUNT,
-} log_level_t;
+#define CR_LOG_LEVEL_TRACE 0
+#define CR_LOG_LEVEL_DEBUG 1
+#define CR_LOG_LEVEL_INFO  2
+#define CR_LOG_LEVEL_WARN  3
+#define CR_LOG_LEVEL_ERROR 4
+#define CR_LOG_LEVEL_FATAL 5
+#define CR_LOG_LEVEL_OFF   6
+
+// CR_LOG_PURGE_LEVEL
+#ifndef CR_LOG_PURGE_LEVEL
+#define CR_LOG_PURGE_LEVEL CR_LOG_LEVEL_TRACE
+#endif
+
+#define CR_LOG(level, ...) cr_log(level, __FILE__, __LINE__, __func__, __VA_ARGS__)
+
+// CR_LOG_TRACE_ENABLED
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
+#define cr_log_trace(...) CR_LOG(CR_LOG_LEVEL_TRACE, __VA_ARGS__)
+#else
+#define cr_log_trace(...) ((void)0)
+#endif
+
+// CR_LOG_DEBUG_ENABLED
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_DEBUG
+#define cr_log_debug(...) CR_LOG(CR_LOG_LEVEL_DEBUG, __VA_ARGS__)
+#else
+#define cr_log_debug(...) ((void)0)
+#endif
+
+// CR_LOG_INFO_ENABLED
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_INFO
+#define cr_log_info(...) CR_LOG(CR_LOG_LEVEL_INFO, __VA_ARGS__)
+#else
+#define cr_log_info(...) ((void)0)
+#endif
+
+// CR_LOG_WARN_ENABLED
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_WARN
+#define cr_log_warn(...) CR_LOG(CR_LOG_LEVEL_WARN, __VA_ARGS__)
+#else
+#define cr_log_warn(...) ((void)0)
+#endif
+
+// CR_LOG_ERROR_ENABLED
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_ERROR
+#define cr_log_error(...) CR_LOG(CR_LOG_LEVEL_ERROR, __VA_ARGS__)
+#else
+#define cr_log_error(...) ((void)0)
+#endif
+
+// CR_LOG_FATAL_ENABLED
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_FATAL
+#define cr_log_fatal(...)                                                                                              \
+    do {                                                                                                               \
+        CR_LOG(CR_LOG_LEVEL_FATAL, __VA_ARGS__);                                                                       \
+        abort();                                                                                                       \
+    } while (0)
+#else
+#define cr_log_fatal(...) abort()
+#endif
+
+typedef uint8_t log_level_t;
 
 void cr_log_init(int* argc, char*** argv);
 void cr_log_set_level(log_level_t level);
 void cr_log_free();
 
-[[noreturn, gnu::format(__printf__, 2, 3)]]
-void cr_log(log_level_t level, const char* fmt, ...);
+[[noreturn, gnu::format(__printf__, 5, 6)]]
+void cr_log(log_level_t level, const char* file, int line, const char* func, const char* fmt, ...);
 
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
+
+// impl
 
 #endif // CR_LOG_IMPL
 #endif // CR_LOG_H
