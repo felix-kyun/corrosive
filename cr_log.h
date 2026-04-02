@@ -195,7 +195,7 @@ cr_log(log_level_t level, [[maybe_unused]] const char* file, [[maybe_unused]] in
 #endif // CR_LOG_H
 
 /*
-This is a single header library that provides a logging functions.
+This is a single header library that provides logging functions.
 This is part of the Corrosive library.
 
 To use this library, do this in *one* of your source files:
