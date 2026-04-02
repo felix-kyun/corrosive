@@ -87,6 +87,7 @@ typedef uint8_t log_level_t;
 struct cr_log_state {
     log_level_t level;
     FILE*       stream;
+    char*       buffer;
 };
 
 void cr_log_init(int* argc, char*** argv);
@@ -131,6 +132,7 @@ cr_log_init(int* argc, char*** argv)
 
     state.level  = CR_LOG_LEVEL_INFO;
     state.stream = stdout;
+    state.buffer = (char*)malloc(CR_LOG_BUFFER_SIZE);
 }
 
 void
@@ -148,34 +150,39 @@ cr_log_set_stream(FILE* stream)
 void
 cr_log_free()
 {
+    free(state.buffer);
 }
 
 void
 cr_log(log_level_t level, const char* file, int line, const char* func, const char* fmt, ...)
 {
-    char   buffer[CR_LOG_BUFFER_SIZE];
+    // runtime purge
+    if (level < state.level) {
+        return;
+    }
+
     size_t offset = 0;
 
     // timestamp
     struct timeval timeval;
     gettimeofday(&timeval, NULL);
     struct tm* tm_info = localtime(&timeval.tv_sec);
-    offset += strftime(buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%Y-%m-%d %H:%M:%S", tm_info);
-    offset += (size_t)snprintf(buffer + offset, CR_LOG_BUFFER_SIZE - offset, ".%03ld] ", timeval.tv_usec);
+    offset += strftime(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%Y-%m-%d %H:%M:%S", tm_info);
+    offset += (size_t)snprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, ".%03ld] ", timeval.tv_usec);
 
     // level
-    offset += (size_t)snprintf(buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s%s%s] ", cr_log_colors[level],
+    offset += (size_t)snprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s%s%s] ", cr_log_colors[level],
         cr_log_level_names[level], cr_log_reset);
 
     // location
-    offset += (size_t)snprintf(buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s:%d %s] ", file, line, func);
+    offset += (size_t)snprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s:%d %s] ", file, line, func);
 
     va_list args;
     va_start(args, fmt);
-    offset += (size_t)vsnprintf(buffer + offset, CR_LOG_BUFFER_SIZE - offset, fmt, args);
+    offset += (size_t)vsnprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, fmt, args);
     va_end(args);
 
-    fprintf(state.stream, "%s\n", buffer);
+    fprintf(state.stream, "%s\n", state.buffer);
     fflush(state.stream);
 }
 
