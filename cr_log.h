@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.2.0 - Logging Library
+    cr_log.h - v0.3.0 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/shl
@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <wchar.h>
 
 #define CR_LOG_LEVEL_TRACE 0
 #define CR_LOG_LEVEL_DEBUG 1
@@ -87,12 +88,15 @@ typedef uint8_t log_level_t;
 struct cr_log_state {
     log_level_t level;
     FILE*       stream;
+    FILE*       file_stream;
     char*       buffer;
 };
 
 void cr_log_init(int* argc, char*** argv);
 void cr_log_set_level(log_level_t level);
 void cr_log_set_stream(FILE* stream);
+void cr_log_flush();
+void cr_log_set_file_stream(const char* path);
 void cr_log_free();
 
 [[gnu::format(__printf__, 5, 6)]]
@@ -148,8 +152,37 @@ cr_log_set_stream(FILE* stream)
 }
 
 void
+cr_log_set_file_stream(const char* path)
+{
+    FILE* new_file_stream = fopen(path, "a");
+    if (new_file_stream == nullptr) {
+        perror("(fopen) Failed to open log file");
+        return;
+    }
+
+    if (state.file_stream && fclose(state.file_stream) != 0) {
+        perror("(fclose) Failed to close log file");
+    }
+    state.file_stream = new_file_stream;
+}
+
+void
+cr_log_flush()
+{
+    if (state.stream && fflush(state.stream) != 0) {
+        perror("(fflush) Failed to flush log stream");
+    }
+    if (state.file_stream && fflush(state.file_stream) != 0) {
+        perror("(fflush) Failed to flush log file");
+    }
+}
+
+void
 cr_log_free()
 {
+    if (state.file_stream && fclose(state.file_stream) != 0) {
+        perror("(fclose) Failed to close log file");
+    }
     free(state.buffer);
 }
 
@@ -187,8 +220,9 @@ cr_log(log_level_t level, [[maybe_unused]] const char* file, [[maybe_unused]] in
     offset += (size_t)vsnprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, fmt, args);
     va_end(args);
 
-    fprintf(state.stream, "%s\n", state.buffer);
-    fflush(state.stream);
+    (void)fprintf(state.stream, "%s\n", state.buffer);
+    (void)fprintf(state.file_stream, "%s\n", state.buffer);
+    cr_log_flush();
 }
 
 #endif // CR_LOG_IMPL
