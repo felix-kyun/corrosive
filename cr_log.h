@@ -154,7 +154,8 @@ cr_log_free()
 }
 
 void
-cr_log(log_level_t level, const char* file, int line, const char* func, const char* fmt, ...)
+cr_log(log_level_t level, [[maybe_unused]] const char* file, [[maybe_unused]] int line,
+    [[maybe_unused]] const char* func, const char* fmt, ...)
 {
     // runtime purge
     if (level < state.level) {
@@ -163,19 +164,23 @@ cr_log(log_level_t level, const char* file, int line, const char* func, const ch
 
     size_t offset = 0;
 
-    // timestamp
+// timestamp
+#ifndef CR_LOG_DISABLE_TIMESTAMP
     struct timeval timeval;
     gettimeofday(&timeval, NULL);
     struct tm* tm_info = localtime(&timeval.tv_sec);
     offset += strftime(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%Y-%m-%d %H:%M:%S", tm_info);
     offset += (size_t)snprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, ".%03ld] ", timeval.tv_usec);
+#endif
 
     // level
     offset += (size_t)snprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s%s%s] ", cr_log_colors[level],
         cr_log_level_names[level], cr_log_reset);
 
-    // location
+// location
+#ifndef CR_LOG_DISABLE_LOCATION
     offset += (size_t)snprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s:%d %s] ", file, line, func);
+#endif
 
     va_list args;
     va_start(args, fmt);
