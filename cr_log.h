@@ -25,6 +25,11 @@
 #define CR_LOG_LEVEL_FATAL 5
 #define CR_LOG_LEVEL_OFF   6
 
+// CR_LOG_BUFFER_SIZE
+#ifndef CR_LOG_BUFFER_SIZE
+#define CR_LOG_BUFFER_SIZE 2048
+#endif
+
 // CR_LOG_PURGE_LEVEL
 #ifndef CR_LOG_PURGE_LEVEL
 #define CR_LOG_PURGE_LEVEL CR_LOG_LEVEL_TRACE
@@ -79,17 +84,100 @@
 #endif
 
 typedef uint8_t log_level_t;
+struct cr_log_state {
+    log_level_t level;
+    FILE*       stream;
+};
 
 void cr_log_init(int* argc, char*** argv);
 void cr_log_set_level(log_level_t level);
+void cr_log_set_stream(FILE* stream);
 void cr_log_free();
 
-[[noreturn, gnu::format(__printf__, 5, 6)]]
+[[gnu::format(__printf__, 5, 6)]]
 void cr_log(log_level_t level, const char* file, int line, const char* func, const char* fmt, ...);
 
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
-// impl
+#include <stdarg.h>
+#include <sys/time.h>
+#include <time.h>
+
+static const char* cr_log_reset    = "\x1b[0m";
+static const char* cr_log_colors[] = {
+    [CR_LOG_LEVEL_TRACE] = "\x1b[34m", // blue
+    [CR_LOG_LEVEL_DEBUG] = "\x1b[36m", // cyan
+    [CR_LOG_LEVEL_INFO]  = "\x1b[32m", // green
+    [CR_LOG_LEVEL_WARN]  = "\x1b[33m", // yellow
+    [CR_LOG_LEVEL_ERROR] = "\x1b[31m", // red
+    [CR_LOG_LEVEL_FATAL] = "\x1b[35m", // magenta
+};
+static const char* cr_log_level_names[] = {
+    [CR_LOG_LEVEL_TRACE] = "TRACE",
+    [CR_LOG_LEVEL_DEBUG] = "DEBUG",
+    [CR_LOG_LEVEL_INFO]  = "INFO",
+    [CR_LOG_LEVEL_WARN]  = "WARN",
+    [CR_LOG_LEVEL_ERROR] = "ERROR",
+    [CR_LOG_LEVEL_FATAL] = "FATAL",
+};
+
+static struct cr_log_state state = { 0 };
+
+void
+cr_log_init(int* argc, char*** argv)
+{
+    (void)argc;
+    (void)argv;
+
+    state.level  = CR_LOG_LEVEL_INFO;
+    state.stream = stdout;
+}
+
+void
+cr_log_set_level(log_level_t level)
+{
+    state.level = level;
+}
+
+void
+cr_log_set_stream(FILE* stream)
+{
+    state.stream = stream;
+}
+
+void
+cr_log_free()
+{
+}
+
+void
+cr_log(log_level_t level, const char* file, int line, const char* func, const char* fmt, ...)
+{
+    char   buffer[CR_LOG_BUFFER_SIZE];
+    size_t offset = 0;
+
+    // timestamp
+    struct timeval timeval;
+    gettimeofday(&timeval, NULL);
+    struct tm* tm_info = localtime(&timeval.tv_sec);
+    offset += strftime(buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%Y-%m-%d %H:%M:%S", tm_info);
+    offset += (size_t)snprintf(buffer + offset, CR_LOG_BUFFER_SIZE - offset, ".%03ld] ", timeval.tv_usec);
+
+    // level
+    offset += (size_t)snprintf(buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s%s%s] ", cr_log_colors[level],
+        cr_log_level_names[level], cr_log_reset);
+
+    // location
+    offset += (size_t)snprintf(buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s:%d %s] ", file, line, func);
+
+    va_list args;
+    va_start(args, fmt);
+    offset += (size_t)vsnprintf(buffer + offset, CR_LOG_BUFFER_SIZE - offset, fmt, args);
+    va_end(args);
+
+    fprintf(state.stream, "%s\n", buffer);
+    fflush(state.stream);
+}
 
 #endif // CR_LOG_IMPL
 #endif // CR_LOG_H
