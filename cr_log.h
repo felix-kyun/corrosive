@@ -131,7 +131,7 @@ cr_log_init(int* argc, char*** argv)
     (void)argv;
 
     state.level  = CR_LOG_LEVEL_INFO;
-    state.stream = stdout;
+    state.stream = stderr;
     state.buffer = (char*)malloc(CR_LOG_BUFFER_SIZE);
 }
 
