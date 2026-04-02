@@ -115,8 +115,8 @@ static const char* cr_log_colors[] = {
 static const char* cr_log_level_names[] = {
     [CR_LOG_LEVEL_TRACE] = "TRACE",
     [CR_LOG_LEVEL_DEBUG] = "DEBUG",
-    [CR_LOG_LEVEL_INFO]  = "INFO",
-    [CR_LOG_LEVEL_WARN]  = "WARN",
+    [CR_LOG_LEVEL_INFO]  = "INFO ",
+    [CR_LOG_LEVEL_WARN]  = "WARN ",
     [CR_LOG_LEVEL_ERROR] = "ERROR",
     [CR_LOG_LEVEL_FATAL] = "FATAL",
 };
