@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.1.0 - Logging Library
+    cr_log.h - v0.2.0 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/shl
