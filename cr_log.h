@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.4.0 - Logging Library
+    cr_log.h - v0.4.1 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -114,10 +114,17 @@ typedef struct cr_log_sink_t {
     void              *state;
 } cr_log_sink_t;
 
-void          cr_log_sink_add(cr_log_sink_t sink);
-cr_log_sink_t cr_log_sink_file(const char *target);
+void cr_log_sink_add(cr_log_sink_t sink);
 // cr_log_sink_t cr_log_sink_console();
 
+// file sink
+struct cr_log_sink_file_config_t {
+    const char *target;
+    bool        truncate;
+};
+
+#define cr_log_sink_file(...) cr_log_sink_file_new((struct cr_log_sink_file_config_t) { __VA_ARGS__ })
+cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t);
 // }}}
 
 typedef uint8_t log_level_t;
@@ -318,7 +325,7 @@ cr_log_sink_file_free(void *sink_state)
 }
 
 cr_log_sink_t
-cr_log_sink_file(const char *target)
+cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
 {
     cr_log_sink_file_state_t *state = malloc(sizeof(cr_log_sink_file_state_t));
     if (!state) {
@@ -332,7 +339,12 @@ cr_log_sink_file(const char *target)
         exit(EXIT_FAILURE);
     }
 
-    state->file_stream = fopen(target, "a");
+    if (config.truncate) {
+        state->file_stream = fopen(config.target, "w");
+    } else {
+        state->file_stream = fopen(config.target, "a");
+    }
+
     if (!state->file_stream) {
         perror("(fopen) file sink open failed");
         exit(EXIT_FAILURE);
