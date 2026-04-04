@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.4.1 - Logging Library
+    cr_log.h - v0.4.2 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -121,6 +121,7 @@ void cr_log_sink_add(cr_log_sink_t sink);
 struct cr_log_sink_file_config_t {
     const char *target;
     bool        truncate;
+    bool        color;
 };
 
 #define cr_log_sink_file(...) cr_log_sink_file_new((struct cr_log_sink_file_config_t) { __VA_ARGS__ })
@@ -243,20 +244,53 @@ cr_log_sink_add(cr_log_sink_t sink)
 
 // file sink
 typedef struct cr_log_sink_file_state_t {
-    FILE *file_stream;
-    char *buffer;
-    int   offset;
+    struct cr_log_sink_file_config_t config;
+    FILE                            *file_stream;
+    char                            *buffer;
+    int                              offset;
 } cr_log_sink_file_state_t;
+void cr_log_sink_file_flush(void *sink_state);
+void cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state);
+void cr_log_sink_file_free(void *sink_state);
 
-void
-cr_log_sink_file_flush(void *sink_state)
+cr_log_sink_t
+cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
 {
-    cr_log_sink_file_state_t *state = sink_state;
+    cr_log_sink_file_state_t *state = malloc(sizeof(cr_log_sink_file_state_t));
+    if (!state) {
+        perror("(malloc) file sink state allocation failed");
+        exit(EXIT_FAILURE);
+    }
 
-    // write buffer to file and flush
-    (void)fwrite(state->buffer, 1, (size_t)state->offset, state->file_stream);
-    (void)fflush(state->file_stream);
+    state->buffer = (char *)malloc(CR_LOG_SINK_FILE_BUFFER);
+    if (!state->buffer) {
+        perror("(malloc) file sink buffer allocation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (config.truncate) {
+        state->file_stream = fopen(config.target, "w");
+    } else {
+        state->file_stream = fopen(config.target, "a");
+    }
+
+    if (!state->file_stream) {
+        perror("(fopen) file sink open failed");
+        exit(EXIT_FAILURE);
+    }
+
     state->offset = 0;
+    state->config = config;
+
+    return (cr_log_sink_t)
+    {
+        .type = {
+            .sink_process = cr_log_sink_file_process,
+            .sink_flush   = cr_log_sink_file_flush,
+            .sink_free    = cr_log_sink_file_free,
+        },
+        .state = state,
+    };
 }
 
 void
@@ -273,8 +307,18 @@ cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *
         += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, ".%03ld] ", meta->time_data.tv_nsec / 1000000);
 
     // level
-    buf_offset
-        += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, "[%s] ", cr_log_level_names[meta->level]);
+    if (state->config.color) {
+        buf_offset += (size_t)snprintf(
+            buf + buf_offset,
+            sizeof(buf) - buf_offset,
+            "[%s%s%s] ",
+            cr_log_colors[meta->level],
+            cr_log_level_names[meta->level],
+            cr_log_reset);
+    } else {
+        buf_offset
+            += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, "[%s] ", cr_log_level_names[meta->level]);
+    }
 
     // location
     buf_offset += (size_t)snprintf(
@@ -313,6 +357,17 @@ cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *
 }
 
 void
+cr_log_sink_file_flush(void *sink_state)
+{
+    cr_log_sink_file_state_t *state = sink_state;
+
+    // write buffer to file and flush
+    (void)fwrite(state->buffer, 1, (size_t)state->offset, state->file_stream);
+    (void)fflush(state->file_stream);
+    state->offset = 0;
+}
+
+void
 cr_log_sink_file_free(void *sink_state)
 {
     struct cr_log_sink_file_state_t *state = sink_state;
@@ -322,45 +377,6 @@ cr_log_sink_file_free(void *sink_state)
 
     free(state->buffer);
     free(state);
-}
-
-cr_log_sink_t
-cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
-{
-    cr_log_sink_file_state_t *state = malloc(sizeof(cr_log_sink_file_state_t));
-    if (!state) {
-        perror("(malloc) file sink state allocation failed");
-        exit(EXIT_FAILURE);
-    }
-
-    state->buffer = (char *)malloc(CR_LOG_SINK_FILE_BUFFER);
-    if (!state->buffer) {
-        perror("(malloc) file sink buffer allocation failed");
-        exit(EXIT_FAILURE);
-    }
-
-    if (config.truncate) {
-        state->file_stream = fopen(config.target, "w");
-    } else {
-        state->file_stream = fopen(config.target, "a");
-    }
-
-    if (!state->file_stream) {
-        perror("(fopen) file sink open failed");
-        exit(EXIT_FAILURE);
-    }
-
-    state->offset = 0;
-
-    return (cr_log_sink_t)
-    {
-        .type = {
-            .sink_process = cr_log_sink_file_process,
-            .sink_flush   = cr_log_sink_file_flush,
-            .sink_free    = cr_log_sink_file_free,
-        },
-        .state = state,
-    };
 }
 
 // }}}
