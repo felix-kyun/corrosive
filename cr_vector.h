@@ -2,7 +2,7 @@
     cr_vector.h - v0.1.0 - dynamically sized array (vector)
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
-    Repo:     https://github.com/felix-kyun/shl
+    Repo:     https://github.com/felix-kyun/corrosive
 
     SPDX-License-Identifier: MIT
     Copyright (c) 2026 Praise Jacob
@@ -28,9 +28,9 @@ typedef struct vector_header_t {
     size_t capacity;
 } vector_header_t;
 
-#define _vector_header(ptr)    ((vector_header_t*)(ptr) - 1)
+#define _vector_header(ptr)    ((vector_header_t *)(ptr) - 1)
 #define _vector_item_size(ptr) (sizeof(*(ptr)))
-#define _ptr_location(ptr)     ((void**)&(ptr))
+#define _ptr_location(ptr)     ((void **)&(ptr))
 
 #define vector_new(ptr, ...)                                                                                           \
     (vector_new_(_ptr_location(ptr), _vector_item_size(ptr), (vector_options_t) { __VA_ARGS__ }))
@@ -42,8 +42,8 @@ typedef struct vector_header_t {
 #define vector_pop_back(vec)            ((vec)[--vector_size(vec)])
 #define vector_peek_back(vec)           ((vec)[vector_size(vec) - 1])
 
-void vector_new_(void** ptr, size_t item_size, vector_options_t opts);
-void vector_reserve_(void** ptr, size_t item_size, size_t count);
+void vector_new_(void **ptr, size_t item_size, vector_options_t opts);
+void vector_reserve_(void **ptr, size_t item_size, size_t count);
 
 #if defined(CR_VECTOR_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
@@ -54,14 +54,14 @@ max_sz(size_t size1, size_t size2)
 }
 
 void
-vector_new_(void** ptr, size_t item_size, vector_options_t opts)
+vector_new_(void **ptr, size_t item_size, vector_options_t opts)
 {
     // apply defaults
     if (!opts.initial_capacity) {
         opts.initial_capacity = vector_min_capacity;
     }
 
-    vector_header_t* header = malloc(sizeof(vector_header_t) + (opts.initial_capacity * item_size));
+    vector_header_t *header = malloc(sizeof(vector_header_t) + (opts.initial_capacity * item_size));
     if (!header) {
         return;
     }
@@ -73,12 +73,12 @@ vector_new_(void** ptr, size_t item_size, vector_options_t opts)
 }
 
 void
-vector_reserve_(void** ptr, size_t item_size, size_t count)
+vector_reserve_(void **ptr, size_t item_size, size_t count)
 {
-    vector_header_t* header = _vector_header(*ptr);
+    vector_header_t *header = _vector_header(*ptr);
     if (header->capacity < count) {
         size_t           new_capacity = max_sz(count, header->capacity * 2);
-        vector_header_t* new_vec      = realloc(header, sizeof(vector_header_t) + (new_capacity * item_size));
+        vector_header_t *new_vec      = realloc(header, sizeof(vector_header_t) + (new_capacity * item_size));
         if (!new_vec) {
             return;
         }

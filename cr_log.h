@@ -2,7 +2,7 @@
     cr_log.h - v0.4.0 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
-    Repo:     https://github.com/felix-kyun/shl
+    Repo:     https://github.com/felix-kyun/corrosive
 
     SPDX-License-Identifier: MIT
     Copyright (c) 2026 Praise Jacob
