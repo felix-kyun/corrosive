@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.3.0 - Logging Library
+    cr_log.h - v0.4.0 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/shl
@@ -13,10 +13,11 @@
 #ifndef CR_LOG_H
 #define CR_LOG_H
 
+#define _POSIX_C_SOURCE 200809L
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <wchar.h>
+#include <time.h>
 
 #define CR_LOG_LEVEL_TRACE 0
 #define CR_LOG_LEVEL_DEBUG 1
@@ -25,6 +26,11 @@
 #define CR_LOG_LEVEL_ERROR 4
 #define CR_LOG_LEVEL_FATAL 5
 #define CR_LOG_LEVEL_OFF   6
+
+// CR_LOG_SINK_LIMIT
+#ifndef CR_LOG_SINK_LIMIT
+#define CR_LOG_SINK_LIMIT 8
+#endif
 
 // CR_LOG_BUFFER_SIZE
 #ifndef CR_LOG_BUFFER_SIZE
@@ -84,30 +90,58 @@
 #define cr_log_fatal(...) abort()
 #endif
 
+// sinks {{{
+#ifndef CR_LOG_SINK_FILE_BUFFER
+#define CR_LOG_SINK_FILE_BUFFER 10240
+#endif
+
+typedef struct cr_log_sink_meta_t {
+    uint8_t         level;
+    struct timespec time_data;
+    const char     *filename;
+    int             line;
+    const char     *function;
+} cr_log_sink_meta_t;
+
+typedef struct cr_log_sink_type_t {
+    void (*sink_process)(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state);
+    void (*sink_flush)(void *sink_state);
+    void (*sink_free)(void *sink_state);
+} cr_log_sink_type_t;
+
+typedef struct cr_log_sink_t {
+    cr_log_sink_type_t type;
+    void              *state;
+} cr_log_sink_t;
+
+void          cr_log_sink_add(cr_log_sink_t sink);
+cr_log_sink_t cr_log_sink_file(const char *target);
+// cr_log_sink_t cr_log_sink_console();
+
+// }}}
+
 typedef uint8_t log_level_t;
 struct cr_log_state {
-    log_level_t level;
-    FILE*       stream;
-    FILE*       file_stream;
-    char*       buffer;
+    log_level_t   level;
+    cr_log_sink_t sinks[CR_LOG_SINK_LIMIT];
+    size_t        sink_count;
+    char         *buffer;
 };
 
-void cr_log_init(int* argc, char*** argv);
+void cr_log_init(int *argc, char ***argv);
 void cr_log_set_level(log_level_t level);
-void cr_log_set_stream(FILE* stream);
 void cr_log_flush();
-void cr_log_set_file_stream(const char* path);
 void cr_log_free();
 
 [[gnu::format(__printf__, 5, 6)]]
-void cr_log(log_level_t level, const char* file, int line, const char* func, const char* fmt, ...);
+void cr_log(log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
 
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
 #include <stdarg.h>
 #include <sys/time.h>
-#include <time.h>
 
+// clang-format off
 static const char* cr_log_reset    = "\x1b[0m";
 static const char* cr_log_colors[] = {
     [CR_LOG_LEVEL_TRACE] = "\x1b[34m", // blue
@@ -125,105 +159,199 @@ static const char* cr_log_level_names[] = {
     [CR_LOG_LEVEL_ERROR] = "ERROR",
     [CR_LOG_LEVEL_FATAL] = "FATAL",
 };
+// clang-format on
 
-static struct cr_log_state state = { 0 };
+static struct cr_log_state logger_state = { 0 };
 
 void
-cr_log_init(int* argc, char*** argv)
+cr_log_init(int *argc, char ***argv)
 {
     (void)argc;
     (void)argv;
 
-    state.level  = CR_LOG_LEVEL_INFO;
-    state.stream = stderr;
-    state.buffer = (char*)malloc(CR_LOG_BUFFER_SIZE);
+    logger_state.level  = CR_LOG_LEVEL_INFO;
+    logger_state.buffer = (char *)malloc(CR_LOG_BUFFER_SIZE);
 }
 
 void
 cr_log_set_level(log_level_t level)
 {
-    state.level = level;
-}
-
-void
-cr_log_set_stream(FILE* stream)
-{
-    state.stream = stream;
-}
-
-void
-cr_log_set_file_stream(const char* path)
-{
-    FILE* new_file_stream = fopen(path, "a");
-    if (new_file_stream == nullptr) {
-        perror("(fopen) Failed to open log file");
-        return;
-    }
-
-    if (state.file_stream && fclose(state.file_stream) != 0) {
-        perror("(fclose) Failed to close log file");
-    }
-    state.file_stream = new_file_stream;
+    logger_state.level = level;
 }
 
 void
 cr_log_flush()
 {
-    if (state.stream && fflush(state.stream) != 0) {
-        perror("(fflush) Failed to flush log stream");
-    }
-    if (state.file_stream && fflush(state.file_stream) != 0) {
-        perror("(fflush) Failed to flush log file");
+    for (int i = 0; i < (int)logger_state.sink_count; i++) {
+        logger_state.sinks[i].type.sink_flush(logger_state.sinks[i].state);
     }
 }
 
 void
 cr_log_free()
 {
-    if (state.file_stream && fclose(state.file_stream) != 0) {
-        perror("(fclose) Failed to close log file");
+    for (int i = 0; i < (int)logger_state.sink_count; i++) {
+        logger_state.sinks[i].type.sink_free(logger_state.sinks[i].state);
     }
-    free(state.buffer);
+    free(logger_state.buffer);
 }
 
 void
-cr_log(log_level_t level, [[maybe_unused]] const char* file, [[maybe_unused]] int line,
-    [[maybe_unused]] const char* func, const char* fmt, ...)
+cr_log(log_level_t level, const char *file, int line, const char *func, const char *fmt, ...)
 {
     // runtime purge
-    if (level < state.level) {
+    if (level < logger_state.level) {
         return;
     }
 
-    size_t offset = 0;
+    cr_log_sink_meta_t meta = {
+        .level     = level,
+        .time_data = { 0 },
+        .filename  = file,
+        .line      = line,
+        .function  = func,
+    };
 
-// timestamp
-#ifndef CR_LOG_DISABLE_TIMESTAMP
-    struct timeval timeval;
-    gettimeofday(&timeval, NULL);
-    struct tm* tm_info = localtime(&timeval.tv_sec);
-    offset += strftime(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%Y-%m-%d %H:%M:%S", tm_info);
-    offset += (size_t)snprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, ".%03ld] ", timeval.tv_usec);
-#endif
-
-    // level
-    offset += (size_t)snprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s%s%s] ", cr_log_colors[level],
-        cr_log_level_names[level], cr_log_reset);
-
-// location
-#ifndef CR_LOG_DISABLE_LOCATION
-    offset += (size_t)snprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, "[%s:%d %s] ", file, line, func);
-#endif
+    clock_gettime(CLOCK_REALTIME_COARSE, &meta.time_data);
 
     va_list args;
     va_start(args, fmt);
-    offset += (size_t)vsnprintf(state.buffer + offset, CR_LOG_BUFFER_SIZE - offset, fmt, args);
+    (void)vsnprintf(logger_state.buffer, CR_LOG_BUFFER_SIZE, fmt, args);
     va_end(args);
 
-    (void)fprintf(state.stream, "%s\n", state.buffer);
-    (void)fprintf(state.file_stream, "%s\n", state.buffer);
-    cr_log_flush();
+    for (int i = 0; i < (int)logger_state.sink_count; i++) {
+        logger_state.sinks[i].type.sink_process(logger_state.buffer, &meta, logger_state.sinks[i].state);
+    }
 }
+
+// sinks {{{
+
+void
+cr_log_sink_add(cr_log_sink_t sink)
+{
+    if (logger_state.sink_count < CR_LOG_SINK_LIMIT) {
+        logger_state.sinks[logger_state.sink_count++] = sink;
+    }
+}
+
+// file sink
+typedef struct cr_log_sink_file_state_t {
+    FILE *file_stream;
+    char *buffer;
+    int   offset;
+} cr_log_sink_file_state_t;
+
+void
+cr_log_sink_file_flush(void *sink_state)
+{
+    cr_log_sink_file_state_t *state = sink_state;
+
+    // write buffer to file and flush
+    (void)fwrite(state->buffer, 1, (size_t)state->offset, state->file_stream);
+    (void)fflush(state->file_stream);
+    state->offset = 0;
+}
+
+void
+cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state)
+{
+    char                      buf[256];
+    size_t                    buf_offset = 0;
+    cr_log_sink_file_state_t *state      = sink_state;
+
+    // time
+    struct tm *time_info = localtime(&meta->time_data.tv_sec);
+    buf_offset += strftime(buf, sizeof(buf), "[%Y-%m-%d %H:%M:%S", time_info);
+    buf_offset
+        += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, ".%03ld] ", meta->time_data.tv_nsec / 1000000);
+
+    // level
+    buf_offset
+        += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, "[%s] ", cr_log_level_names[meta->level]);
+
+    // location
+    buf_offset += (size_t)snprintf(
+        buf + buf_offset, sizeof(buf) - buf_offset, "[%s:%d %s] ", meta->filename, meta->line, meta->function);
+
+    // try
+    int offset
+        = snprintf(state->buffer + state->offset, CR_LOG_SINK_FILE_BUFFER - (size_t)state->offset, "%s%s\n", buf, msg);
+
+    if (offset < 0) {
+        perror("(snprintf) failed to append to file sink buffer");
+        exit(EXIT_FAILURE);
+    }
+
+    if (offset > CR_LOG_SINK_FILE_BUFFER) {
+        // larger than buffer, write directly
+        cr_log_sink_file_flush(sink_state);
+        (void)fprintf(state->file_stream, "%s", msg);
+        return;
+    }
+
+    if (state->offset + offset >= CR_LOG_SINK_FILE_BUFFER) {
+        // buffer overflow, flush and retry
+        cr_log_sink_file_flush(sink_state);
+        int ret = snprintf(
+            state->buffer + state->offset, CR_LOG_SINK_FILE_BUFFER - (size_t)state->offset, "%s%s\n", buf, msg);
+
+        if (ret < 0) {
+            perror("(snprintf) failed to append to file sink buffer");
+            exit(EXIT_FAILURE);
+        }
+        state->offset += ret;
+    }
+
+    state->offset += offset;
+}
+
+void
+cr_log_sink_file_free(void *sink_state)
+{
+    struct cr_log_sink_file_state_t *state = sink_state;
+
+    cr_log_sink_file_flush(state);
+    (void)fclose(state->file_stream);
+
+    free(state->buffer);
+    free(state);
+}
+
+cr_log_sink_t
+cr_log_sink_file(const char *target)
+{
+    cr_log_sink_file_state_t *state = malloc(sizeof(cr_log_sink_file_state_t));
+    if (!state) {
+        perror("(malloc) file sink state allocation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    state->buffer = (char *)malloc(CR_LOG_SINK_FILE_BUFFER);
+    if (!state->buffer) {
+        perror("(malloc) file sink buffer allocation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    state->file_stream = fopen(target, "a");
+    if (!state->file_stream) {
+        perror("(fopen) file sink open failed");
+        exit(EXIT_FAILURE);
+    }
+
+    state->offset = 0;
+
+    return (cr_log_sink_t)
+    {
+        .type = {
+            .sink_process = cr_log_sink_file_process,
+            .sink_flush   = cr_log_sink_file_flush,
+            .sink_free    = cr_log_sink_file_free,
+        },
+        .state = state,
+    };
+}
+
+// }}}
 
 #endif // CR_LOG_IMPL
 #endif // CR_LOG_H
