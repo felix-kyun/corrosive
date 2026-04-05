@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.4.2 - Logging Library
+    cr_log.h - v0.4.3 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -122,6 +122,8 @@ struct cr_log_sink_file_config_t {
     const char *target;
     bool        truncate;
     bool        color;
+    // -1 to disable, 0 to use default, >0 to set custom buffer size
+    ssize_t ibuffer_size;
 };
 
 #define cr_log_sink_file(...) cr_log_sink_file_new((struct cr_log_sink_file_config_t) { __VA_ARGS__ })
@@ -247,8 +249,10 @@ typedef struct cr_log_sink_file_state_t {
     struct cr_log_sink_file_config_t config;
     FILE                            *file_stream;
     char                            *buffer;
+    size_t                           buffer_size;
     int                              offset;
 } cr_log_sink_file_state_t;
+
 void cr_log_sink_file_flush(void *sink_state);
 void cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state);
 void cr_log_sink_file_free(void *sink_state);
@@ -262,12 +266,6 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
         exit(EXIT_FAILURE);
     }
 
-    state->buffer = (char *)malloc(CR_LOG_SINK_FILE_BUFFER);
-    if (!state->buffer) {
-        perror("(malloc) file sink buffer allocation failed");
-        exit(EXIT_FAILURE);
-    }
-
     if (config.truncate) {
         state->file_stream = fopen(config.target, "w");
     } else {
@@ -277,6 +275,20 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
     if (!state->file_stream) {
         perror("(fopen) file sink open failed");
         exit(EXIT_FAILURE);
+    }
+
+    // allocate internal buffer
+    if (config.ibuffer_size < 0) {
+        state->buffer      = nullptr;
+        state->buffer_size = 0;
+        (void)setvbuf(state->file_stream, nullptr, _IONBF, 0);
+    } else {
+        state->buffer_size = (config.ibuffer_size == 0) ? CR_LOG_SINK_FILE_BUFFER : (size_t)config.ibuffer_size;
+        state->buffer      = (char *)malloc(state->buffer_size);
+        if (!state->buffer) {
+            perror("(malloc) file sink buffer allocation failed");
+            exit(EXIT_FAILURE);
+        }
     }
 
     state->offset = 0;
@@ -324,27 +336,33 @@ cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *
     buf_offset += (size_t)snprintf(
         buf + buf_offset, sizeof(buf) - buf_offset, "[%s:%d %s] ", meta->filename, meta->line, meta->function);
 
+    if (state->buffer_size == 0) {
+        // bypass buffer, write directly
+        (void)fprintf(state->file_stream, "%s%s\n", buf, msg);
+        return;
+    }
+
     // try
     int offset
-        = snprintf(state->buffer + state->offset, CR_LOG_SINK_FILE_BUFFER - (size_t)state->offset, "%s%s\n", buf, msg);
+        = snprintf(state->buffer + state->offset, state->buffer_size - (size_t)state->offset, "%s%s\n", buf, msg);
 
     if (offset < 0) {
         perror("(snprintf) failed to append to file sink buffer");
         exit(EXIT_FAILURE);
     }
 
-    if (offset > CR_LOG_SINK_FILE_BUFFER) {
-        // larger than buffer, write directly
+    if (offset > (int)state->buffer_size) {
+        // larger than buffer, write through
         cr_log_sink_file_flush(sink_state);
         (void)fprintf(state->file_stream, "%s", msg);
         return;
     }
 
-    if (state->offset + offset >= CR_LOG_SINK_FILE_BUFFER) {
+    if (state->offset + offset >= (int)state->buffer_size) {
         // buffer overflow, flush and retry
         cr_log_sink_file_flush(sink_state);
-        int ret = snprintf(
-            state->buffer + state->offset, CR_LOG_SINK_FILE_BUFFER - (size_t)state->offset, "%s%s\n", buf, msg);
+        int ret
+            = snprintf(state->buffer + state->offset, state->buffer_size - (size_t)state->offset, "%s%s\n", buf, msg);
 
         if (ret < 0) {
             perror("(snprintf) failed to append to file sink buffer");
