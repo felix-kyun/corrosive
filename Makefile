@@ -2,7 +2,8 @@
 CC := clang
 CFLAGS := -Wall -Wextra -Werror -pedantic -std=c23 \
 	-Wshadow -Wconversion -Wnull-dereference -Wformat=2 -Wundef \
-	-g -fsanitize=address,undefined,leak -O0
+	-g -fsanitize=address,undefined,leak -O0 \
+	-DCORROSIVE_IMPLEMENTATION
 
 BUILD_DIR := build
 TEST_DIR := tests
