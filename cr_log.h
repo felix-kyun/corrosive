@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.5.3 - Logging Library
+    cr_log.h - v0.5.4 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -43,23 +43,22 @@
 #define CR_LOG_PURGE_LEVEL CR_LOG_LEVEL_TRACE
 #endif
 
+// * compile time purging
+
 #define CR_LOG(level, ...) cr_log(level, __FILE__, __LINE__, __func__, __VA_ARGS__)
 
-// CR_LOG_TRACE_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
 #define cr_log_trace(fmt, ...) CR_LOG(CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_trace(...) ((void)0)
 #endif
 
-// CR_LOG_DEBUG_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_DEBUG
 #define cr_log_debug(fmt, ...) CR_LOG(CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_debug(...) ((void)0)
 #endif
 
-// CR_LOG_INFO_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_INFO
 #define cr_log_info(fmt, ...) CR_LOG(CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
 #else
@@ -87,12 +86,20 @@
 #define cr_log_fatal(...) ((void)0)
 #endif
 
-// sinks {{{
+typedef uint8_t cr_log_level_t;
+
+void cr_log_init(void);
+void cr_log_flush(void);
+void cr_log_free(void);
+
+[[gnu::format(__printf__, 5, 6)]]
+void cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
+void cr_log_set_level(cr_log_level_t level);
+
+// * sink
 #ifndef CR_LOG_SINK_FILE_BUFFER
 #define CR_LOG_SINK_FILE_BUFFER 10240
 #endif
-
-typedef uint8_t cr_log_level_t;
 
 typedef struct cr_log_sink_meta_t {
     uint8_t         level;
@@ -102,20 +109,16 @@ typedef struct cr_log_sink_meta_t {
     const char     *function;
 } cr_log_sink_meta_t;
 
-typedef struct cr_log_sink_type_t {
-    void (*sink_process)(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state);
-    void (*sink_flush)(void *sink_state);
-    void (*sink_free)(void *sink_state);
-} cr_log_sink_type_t;
-
 typedef struct cr_log_sink_t {
-    cr_log_sink_type_t type;
-    void              *state;
+    void (*process)(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state);
+    void (*flush)(void *sink_state);
+    void (*free)(void *sink_state);
+    void *state;
 } cr_log_sink_t;
 
 void cr_log_sink_add(cr_log_sink_t sink);
 
-// file sink
+// ** file sink
 struct cr_log_sink_file_config_t {
     const char    *target;
     const FILE    *file;
@@ -135,30 +138,16 @@ struct cr_log_sink_file_config_t {
 
 cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 
-// }}}
-
-struct cr_log_state {
-    pthread_mutex_t lock;
-    cr_log_level_t  level;
-    cr_log_sink_t   sinks[CR_LOG_SINK_LIMIT];
-    size_t          sink_count;
-    char           *buffer;
-};
-
-void cr_log_init(int *argc, char ***argv);
-void cr_log_set_level(cr_log_level_t level);
-void cr_log_flush();
-void cr_log_free();
-
-[[gnu::format(__printf__, 5, 6)]]
-void cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
-
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
 #include <stdarg.h>
 #include <sys/time.h>
 
-#define err(fmt, ...) fprintf(stderr, (fmt), ##__VA_ARGS__)
+#define err(fmt, ...)                                                                                                  \
+    do {                                                                                                               \
+        (void)fprintf(stderr, "error(%s:%s:%d)", __FILE__, __func__, __LINE__);                                        \
+        (void)fprintf(stderr, (fmt), ##__VA_ARGS__);                                                                   \
+    } while (0)
 
 // clang-format off
 static const char* cr_log_reset    = "\x1b[0m";
@@ -180,14 +169,17 @@ static const char* cr_log_level_names[] = {
 };
 // clang-format on
 
-static struct cr_log_state logger_state = { 0 };
+static struct {
+    pthread_mutex_t lock;
+    cr_log_level_t  level;
+    cr_log_sink_t   sinks[CR_LOG_SINK_LIMIT];
+    size_t          sink_count;
+    char           *buffer;
+} logger_state = { 0 };
 
 void
-cr_log_init(int *argc, char ***argv)
+cr_log_init(void)
 {
-    (void)argc;
-    (void)argv;
-
     logger_state.level  = CR_LOG_LEVEL_INFO;
     logger_state.buffer = (char *)malloc(CR_LOG_BUFFER_SIZE);
     pthread_mutex_init(&logger_state.lock, NULL);
@@ -200,18 +192,18 @@ cr_log_set_level(cr_log_level_t level)
 }
 
 void
-cr_log_flush()
+cr_log_flush(void)
 {
     for (int i = 0; i < (int)logger_state.sink_count; i++) {
-        logger_state.sinks[i].type.sink_flush(logger_state.sinks[i].state);
+        logger_state.sinks[i].flush(logger_state.sinks[i].state);
     }
 }
 
 void
-cr_log_free()
+cr_log_free(void)
 {
     for (int i = 0; i < (int)logger_state.sink_count; i++) {
-        logger_state.sinks[i].type.sink_free(logger_state.sinks[i].state);
+        logger_state.sinks[i].free(logger_state.sinks[i].state);
     }
     free(logger_state.buffer);
 }
@@ -242,14 +234,13 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
     va_end(args);
 
     for (int i = 0; i < (int)logger_state.sink_count; i++) {
-        logger_state.sinks[i].type.sink_process(logger_state.buffer, &meta, logger_state.sinks[i].state);
+        logger_state.sinks[i].process(logger_state.buffer, &meta, logger_state.sinks[i].state);
     }
 
     pthread_mutex_unlock(&logger_state.lock);
 }
 
-// sinks {{{
-
+// * Sinks
 void
 cr_log_sink_add(cr_log_sink_t sink)
 {
@@ -258,7 +249,7 @@ cr_log_sink_add(cr_log_sink_t sink)
     }
 }
 
-// file sink
+// ** File sink
 typedef struct cr_log_sink_file_state_t {
     struct cr_log_sink_file_config_t config;
     FILE                            *file_stream;
@@ -267,9 +258,9 @@ typedef struct cr_log_sink_file_state_t {
     int                              offset;
 } cr_log_sink_file_state_t;
 
-void cr_log_sink_file_flush(void *sink_state);
-void cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state);
-void cr_log_sink_file_free(void *sink_state);
+void cr_log__sink_file_flush(void *sink_state);
+void cr_log__sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state);
+void cr_log__sink_file_free(void *sink_state);
 
 cr_log_sink_t
 cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
@@ -291,6 +282,7 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
     } else {
         // fallback
         // TODO: make err macro to print directrly to stderr
+        err("fallback to stderr: target=%s file=%p\n", config.target, config.file);
         state->file_stream = stderr;
     }
 
@@ -316,19 +308,16 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
     state->offset = 0;
     state->config = config;
 
-    return (cr_log_sink_t)
-    {
-        .type = {
-            .sink_process = cr_log_sink_file_process,
-            .sink_flush   = cr_log_sink_file_flush,
-            .sink_free    = cr_log_sink_file_free,
-        },
-        .state = state,
+    return (cr_log_sink_t) {
+        .state   = state,
+        .process = cr_log__sink_file_process,
+        .flush   = cr_log__sink_file_flush,
+        .free    = cr_log__sink_file_free,
     };
 }
 
 void
-cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state)
+cr_log__sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state)
 {
     cr_log_sink_file_state_t *state = sink_state;
     if (meta->level < state->config.level) {
@@ -379,14 +368,14 @@ cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *
 
     if (offset > (int)state->buffer_size) {
         // larger than buffer, write through
-        cr_log_sink_file_flush(sink_state);
+        cr_log__sink_file_flush(sink_state);
         (void)fprintf(state->file_stream, "%s", msg);
         return;
     }
 
     if (state->offset + offset >= (int)state->buffer_size) {
         // buffer overflow, flush and retry
-        cr_log_sink_file_flush(sink_state);
+        cr_log__sink_file_flush(sink_state);
         int ret
             = snprintf(state->buffer + state->offset, state->buffer_size - (size_t)state->offset, "%s%s\n", buf, msg);
 
@@ -401,7 +390,7 @@ cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *
 }
 
 void
-cr_log_sink_file_flush(void *sink_state)
+cr_log__sink_file_flush(void *sink_state)
 {
     cr_log_sink_file_state_t *state = sink_state;
 
@@ -412,11 +401,11 @@ cr_log_sink_file_flush(void *sink_state)
 }
 
 void
-cr_log_sink_file_free(void *sink_state)
+cr_log__sink_file_free(void *sink_state)
 {
     struct cr_log_sink_file_state_t *state = sink_state;
 
-    cr_log_sink_file_flush(state);
+    cr_log__sink_file_flush(state);
     if (!state->config.disable_close) {
         (void)fclose(state->file_stream);
     }
@@ -424,7 +413,7 @@ cr_log_sink_file_free(void *sink_state)
     free(state->buffer);
     free(state);
 }
-
+// }}}
 // }}}
 
 #endif // CR_LOG_IMPL
