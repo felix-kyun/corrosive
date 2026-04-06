@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.4.3 - Logging Library
+    cr_log.h - v0.5.0 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -116,19 +116,26 @@ typedef struct cr_log_sink_t {
 } cr_log_sink_t;
 
 void cr_log_sink_add(cr_log_sink_t sink);
-// cr_log_sink_t cr_log_sink_console();
 
 // file sink
 struct cr_log_sink_file_config_t {
     const char *target;
+    const FILE *file;
     bool        truncate;
+    bool        disable_close;
     bool        color;
     // -1 to disable, 0 to use default, >0 to set custom buffer size
     ssize_t ibuffer_size;
 };
 
 #define cr_log_sink_file(...) cr_log_sink_file_new((struct cr_log_sink_file_config_t) { __VA_ARGS__ })
+#define cr_log_sink_default()                                                                                          \
+    cr_log_sink_file_new((struct cr_log_sink_file_config_t) { .file = stderr, .color = true, .ibuffer_size = -1 })
+#define cr_log_sink_filep(filep, ...)                                                                                  \
+    cr_log_sink_file_new((struct cr_log_sink_file_config_t) { .file = filep, __VA_ARGS__ })
+
 cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
+
 // }}}
 
 typedef uint8_t log_level_t;
@@ -273,10 +280,18 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
         exit(EXIT_FAILURE);
     }
 
-    if (config.truncate) {
-        state->file_stream = fopen(config.target, "w");
+    if (config.target != nullptr) {
+        if (config.truncate) {
+            state->file_stream = fopen(config.target, "w");
+        } else {
+            state->file_stream = fopen(config.target, "a");
+        }
+    } else if (config.file != nullptr) {
+        state->file_stream = (FILE *)config.file;
     } else {
-        state->file_stream = fopen(config.target, "a");
+        // fallback
+        // TODO: make err macro to print directrly to stderr
+        state->file_stream = stderr;
     }
 
     if (!state->file_stream) {
@@ -398,7 +413,9 @@ cr_log_sink_file_free(void *sink_state)
     struct cr_log_sink_file_state_t *state = sink_state;
 
     cr_log_sink_file_flush(state);
-    (void)fclose(state->file_stream);
+    if (!state->config.disable_close) {
+        (void)fclose(state->file_stream);
+    }
 
     free(state->buffer);
     free(state);
