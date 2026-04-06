@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.5.0 - Logging Library
+    cr_log.h - v0.5.1 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -96,6 +96,8 @@
 #define CR_LOG_SINK_FILE_BUFFER 10240
 #endif
 
+typedef uint8_t log_level_t;
+
 typedef struct cr_log_sink_meta_t {
     uint8_t         level;
     struct timespec time_data;
@@ -124,6 +126,7 @@ struct cr_log_sink_file_config_t {
     bool        truncate;
     bool        disable_close;
     bool        color;
+    log_level_t level;
     // -1 to disable, 0 to use default, >0 to set custom buffer size
     ssize_t ibuffer_size;
 };
@@ -138,7 +141,6 @@ cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 
 // }}}
 
-typedef uint8_t log_level_t;
 struct cr_log_state {
     pthread_mutex_t lock;
     log_level_t     level;
@@ -330,9 +332,13 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
 void
 cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state)
 {
-    char                      buf[256];
-    size_t                    buf_offset = 0;
-    cr_log_sink_file_state_t *state      = sink_state;
+    cr_log_sink_file_state_t *state = sink_state;
+    if (meta->level < state->config.level) {
+        return;
+    }
+
+    char   buf[256];
+    size_t buf_offset = 0;
 
     // time
     struct tm *time_info = localtime(&meta->time_data.tv_sec);
