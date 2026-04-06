@@ -127,7 +127,7 @@ struct cr_log_sink_file_config_t {
 };
 
 #define cr_log_sink_file(...) cr_log_sink_file_new((struct cr_log_sink_file_config_t) { __VA_ARGS__ })
-cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t);
+cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 // }}}
 
 typedef uint8_t log_level_t;
