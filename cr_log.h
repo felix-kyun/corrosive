@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.5.2 - Logging Library
+    cr_log.h - v0.5.3 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -47,48 +47,44 @@
 
 // CR_LOG_TRACE_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
-#define cr_log_trace(...) CR_LOG(CR_LOG_LEVEL_TRACE, __VA_ARGS__)
+#define cr_log_trace(fmt, ...) CR_LOG(CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_trace(...) ((void)0)
 #endif
 
 // CR_LOG_DEBUG_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_DEBUG
-#define cr_log_debug(...) CR_LOG(CR_LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define cr_log_debug(fmt, ...) CR_LOG(CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_debug(...) ((void)0)
 #endif
 
 // CR_LOG_INFO_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_INFO
-#define cr_log_info(...) CR_LOG(CR_LOG_LEVEL_INFO, __VA_ARGS__)
+#define cr_log_info(fmt, ...) CR_LOG(CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_info(...) ((void)0)
 #endif
 
 // CR_LOG_WARN_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_WARN
-#define cr_log_warn(...) CR_LOG(CR_LOG_LEVEL_WARN, __VA_ARGS__)
+#define cr_log_warn(fmt, ...) CR_LOG(CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_warn(...) ((void)0)
 #endif
 
 // CR_LOG_ERROR_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_ERROR
-#define cr_log_error(...) CR_LOG(CR_LOG_LEVEL_ERROR, __VA_ARGS__)
+#define cr_log_error(fmt, ...) CR_LOG(CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_error(...) ((void)0)
 #endif
 
 // CR_LOG_FATAL_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_FATAL
-#define cr_log_fatal(...)                                                                                              \
-    do {                                                                                                               \
-        CR_LOG(CR_LOG_LEVEL_FATAL, __VA_ARGS__);                                                                       \
-        abort();                                                                                                       \
-    } while (0)
+#define cr_log_fatal(fmt, ...) CR_LOG(CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
 #else
-#define cr_log_fatal(...) abort()
+#define cr_log_fatal(...) ((void)0)
 #endif
 
 // sinks {{{
@@ -161,6 +157,8 @@ void cr_log(cr_log_level_t level, const char *file, int line, const char *func, 
 
 #include <stdarg.h>
 #include <sys/time.h>
+
+#define err(fmt, ...) fprintf(stderr, (fmt), ##__VA_ARGS__)
 
 // clang-format off
 static const char* cr_log_reset    = "\x1b[0m";
@@ -279,7 +277,7 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
     cr_log_sink_file_state_t *state = malloc(sizeof(cr_log_sink_file_state_t));
     if (!state) {
         perror("(malloc) file sink state allocation failed");
-        exit(EXIT_FAILURE);
+        return (cr_log_sink_t) { 0 };
     }
 
     if (config.target != nullptr) {
@@ -298,7 +296,7 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
 
     if (!state->file_stream) {
         perror("(fopen) file sink open failed");
-        exit(EXIT_FAILURE);
+        return (cr_log_sink_t) { 0 };
     }
 
     // allocate internal buffer
@@ -311,7 +309,7 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
         state->buffer      = (char *)malloc(state->buffer_size);
         if (!state->buffer) {
             perror("(malloc) file sink buffer allocation failed");
-            exit(EXIT_FAILURE);
+            return (cr_log_sink_t) { 0 };
         }
     }
 
@@ -376,7 +374,7 @@ cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *
 
     if (offset < 0) {
         perror("(snprintf) failed to append to file sink buffer");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     if (offset > (int)state->buffer_size) {
@@ -394,7 +392,7 @@ cr_log_sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *
 
         if (ret < 0) {
             perror("(snprintf) failed to append to file sink buffer");
-            exit(EXIT_FAILURE);
+            return;
         }
         state->offset += ret;
     }
