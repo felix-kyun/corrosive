@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.5.1 - Logging Library
+    cr_log.h - v0.5.2 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -96,7 +96,7 @@
 #define CR_LOG_SINK_FILE_BUFFER 10240
 #endif
 
-typedef uint8_t log_level_t;
+typedef uint8_t cr_log_level_t;
 
 typedef struct cr_log_sink_meta_t {
     uint8_t         level;
@@ -121,12 +121,12 @@ void cr_log_sink_add(cr_log_sink_t sink);
 
 // file sink
 struct cr_log_sink_file_config_t {
-    const char *target;
-    const FILE *file;
-    bool        truncate;
-    bool        disable_close;
-    bool        color;
-    log_level_t level;
+    const char    *target;
+    const FILE    *file;
+    bool           truncate;
+    bool           disable_close;
+    bool           color;
+    cr_log_level_t level;
     // -1 to disable, 0 to use default, >0 to set custom buffer size
     ssize_t ibuffer_size;
 };
@@ -143,19 +143,19 @@ cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 
 struct cr_log_state {
     pthread_mutex_t lock;
-    log_level_t     level;
+    cr_log_level_t  level;
     cr_log_sink_t   sinks[CR_LOG_SINK_LIMIT];
     size_t          sink_count;
     char           *buffer;
 };
 
 void cr_log_init(int *argc, char ***argv);
-void cr_log_set_level(log_level_t level);
+void cr_log_set_level(cr_log_level_t level);
 void cr_log_flush();
 void cr_log_free();
 
 [[gnu::format(__printf__, 5, 6)]]
-void cr_log(log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
+void cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
 
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
@@ -196,7 +196,7 @@ cr_log_init(int *argc, char ***argv)
 }
 
 void
-cr_log_set_level(log_level_t level)
+cr_log_set_level(cr_log_level_t level)
 {
     logger_state.level = level;
 }
@@ -219,7 +219,7 @@ cr_log_free()
 }
 
 void
-cr_log(log_level_t level, const char *file, int line, const char *func, const char *fmt, ...)
+cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...)
 {
     // runtime purge
     if (level < logger_state.level) {
