@@ -14,6 +14,7 @@
 #define CR_LOG_H
 
 #define _POSIX_C_SOURCE 200809L
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,10 +133,11 @@ cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 
 typedef uint8_t log_level_t;
 struct cr_log_state {
-    log_level_t   level;
-    cr_log_sink_t sinks[CR_LOG_SINK_LIMIT];
-    size_t        sink_count;
-    char         *buffer;
+    pthread_mutex_t lock;
+    log_level_t     level;
+    cr_log_sink_t   sinks[CR_LOG_SINK_LIMIT];
+    size_t          sink_count;
+    char           *buffer;
 };
 
 void cr_log_init(int *argc, char ***argv);
@@ -181,6 +183,7 @@ cr_log_init(int *argc, char ***argv)
 
     logger_state.level  = CR_LOG_LEVEL_INFO;
     logger_state.buffer = (char *)malloc(CR_LOG_BUFFER_SIZE);
+    pthread_mutex_init(&logger_state.lock, NULL);
 }
 
 void
@@ -224,6 +227,8 @@ cr_log(log_level_t level, const char *file, int line, const char *func, const ch
 
     clock_gettime(CLOCK_REALTIME_COARSE, &meta.time_data);
 
+    pthread_mutex_lock(&logger_state.lock);
+
     va_list args;
     va_start(args, fmt);
     (void)vsnprintf(logger_state.buffer, CR_LOG_BUFFER_SIZE, fmt, args);
@@ -232,6 +237,8 @@ cr_log(log_level_t level, const char *file, int line, const char *func, const ch
     for (int i = 0; i < (int)logger_state.sink_count; i++) {
         logger_state.sinks[i].type.sink_process(logger_state.buffer, &meta, logger_state.sinks[i].state);
     }
+
+    pthread_mutex_unlock(&logger_state.lock);
 }
 
 // sinks {{{
