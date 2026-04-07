@@ -101,7 +101,7 @@ void cr_log_init(void);
 void cr_log_flush(void);
 void cr_log_free(void);
 
-[[gnu::format(__printf__, 5, 6)]]
+[[gnu::hot, gnu::format(__printf__, 5, 6)]]
 void cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
 void cr_log_set_level(cr_log_level_t level);
 
@@ -173,6 +173,8 @@ cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 #include <stdarg.h>
 #include <sys/time.h>
 
+#define likely(x)   __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
 #define err(fmt, ...)                                                                                                  \
     do {                                                                                                               \
         (void)fprintf(stderr, "error(%s:%s:%d)", __FILE__, __func__, __LINE__);                                        \
@@ -279,7 +281,7 @@ void
 cr_log__scope_push(const char *scope)
 {
     auto stack = &cr_log__scope_stack;
-    if (stack->depth < CR_LOG_SCOPE_MAX) {
+    if (likely(stack->depth < CR_LOG_SCOPE_MAX)) {
         // save reset point
         stack->buffer_offsets[stack->depth] = stack->buffer_length;
 
@@ -290,9 +292,9 @@ cr_log__scope_push(const char *scope)
             stack->depth == 0 ? "" : "::",
             scope);
 
-        if (stack->buffer_length + written < CR_LOG_SCOPE_BUFFER) {
+        if (likely(stack->buffer_length + written < CR_LOG_SCOPE_BUFFER)) {
             stack->buffer_length += written;
-        } else if (written > 0) {
+        } else if (unlikely(written > 0)) {
             err("(scope_push) Scope buffer overflow: %s", scope);
         } else {
             err("(scope_push) Failed to push scope %s", scope);
