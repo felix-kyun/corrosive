@@ -13,7 +13,8 @@
 #ifndef CR_LOG_H
 #define CR_LOG_H
 
-#define _POSIX_C_SOURCE 200809L
+#include <string.h>
+#define _POSIX_C_SOURCE 202405L
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -41,6 +42,14 @@
 // CR_LOG_PURGE_LEVEL
 #ifndef CR_LOG_PURGE_LEVEL
 #define CR_LOG_PURGE_LEVEL CR_LOG_LEVEL_TRACE
+#endif
+
+// SCOPE
+#ifndef CR_LOG_SCOPE_MAX
+#define CR_LOG_SCOPE_MAX 16
+#endif
+#ifndef CR_LOG_SCOPE_BUFFER
+#define CR_LOG_SCOPE_BUFFER 256
 #endif
 
 // * compile time purging
@@ -96,6 +105,26 @@ void cr_log_free(void);
 void cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
 void cr_log_set_level(cr_log_level_t level);
 
+// * scope
+#ifndef CR_LOG_SCOPE_DISABLE
+#define cr_log_scope_push(scope) cr_log__scope_push(scope)
+#define cr_log_scope_pop()       cr_log__scope_pop()
+#else
+#define cr_log_scope_push(scope) ((void)0)
+#define cr_log_scope_pop()       ((void)0)
+#endif
+
+_Thread_local struct {
+    int  depth;
+    char buffer[CR_LOG_SCOPE_BUFFER];
+    int  buffer_length;
+    int  buffer_offsets[CR_LOG_SCOPE_MAX];
+} cr_log__scope_stack = { 0 };
+
+void        cr_log__scope_push(const char *scope);
+void        cr_log__scope_pop(void);
+const char *cr_log__scope_get(void);
+
 // * sink
 #ifndef CR_LOG_SINK_FILE_BUFFER
 #define CR_LOG_SINK_FILE_BUFFER 10240
@@ -107,6 +136,7 @@ typedef struct cr_log_sink_meta_t {
     const char     *filename;
     int             line;
     const char     *function;
+    char            scope[CR_LOG_SCOPE_BUFFER];
 } cr_log_sink_meta_t;
 
 typedef struct cr_log_sink_t {
@@ -222,9 +252,13 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
         .filename  = file,
         .line      = line,
         .function  = func,
+        .scope     = { 0 },
     };
 
     clock_gettime(CLOCK_REALTIME_COARSE, &meta.time_data);
+    if (cr_log__scope_stack.depth > 0) {
+        strncpy(meta.scope, cr_log__scope_get(), CR_LOG_SCOPE_BUFFER);
+    }
 
     pthread_mutex_lock(&logger_state.lock);
 
@@ -238,6 +272,52 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
     }
 
     pthread_mutex_unlock(&logger_state.lock);
+}
+
+// * Scope
+void
+cr_log__scope_push(const char *scope)
+{
+    auto stack = &cr_log__scope_stack;
+    if (stack->depth < CR_LOG_SCOPE_MAX) {
+        // save reset point
+        stack->buffer_offsets[stack->depth] = stack->buffer_length;
+
+        int written = snprintf(
+            stack->buffer + stack->buffer_length,
+            (size_t)(CR_LOG_SCOPE_BUFFER - stack->buffer_length),
+            "%s%s",
+            stack->depth == 0 ? "" : "::",
+            scope);
+
+        if (stack->buffer_length + written < CR_LOG_SCOPE_BUFFER) {
+            stack->buffer_length += written;
+        } else if (written > 0) {
+            err("(scope_push) Scope buffer overflow: %s", scope);
+        } else {
+            err("(scope_push) Failed to push scope %s", scope);
+        }
+
+        stack->depth++;
+    }
+}
+
+void
+cr_log__scope_pop(void)
+{
+    auto stack = &cr_log__scope_stack;
+    if (stack->depth <= 0) {
+        return;
+    }
+    stack->depth--;
+    stack->buffer_length                = stack->buffer_offsets[stack->depth];
+    stack->buffer[stack->buffer_length] = '\0';
+}
+
+const char *
+cr_log__scope_get(void)
+{
+    return cr_log__scope_stack.buffer;
 }
 
 // * Sinks
@@ -280,8 +360,6 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
     } else if (config.file != nullptr) {
         state->file_stream = (FILE *)config.file;
     } else {
-        // fallback
-        // TODO: make err macro to print directrly to stderr
         err("fallback to stderr: target=%s file=%p\n", config.target, config.file);
         state->file_stream = stderr;
     }
@@ -345,6 +423,13 @@ cr_log__sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void 
     } else {
         buf_offset
             += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, "[%s] ", cr_log_level_names[meta->level]);
+    }
+
+    // scope
+    if (meta->scope[0] != '\0') {
+        buf_offset += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, "[%s] ", meta->scope);
+    } else {
+        buf_offset += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, "[ ] ");
     }
 
     // location
