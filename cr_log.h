@@ -125,22 +125,23 @@ void        cr_log__scope_push(const char *scope);
 void        cr_log__scope_pop(void);
 const char *cr_log__scope_get(void);
 
-// * sink
+// * sinks
 #ifndef CR_LOG_SINK_FILE_BUFFER
 #define CR_LOG_SINK_FILE_BUFFER 10240
 #endif
 
-typedef struct cr_log_sink_meta_t {
+typedef struct cr_log_sink_event_t {
+    const char     *message;
     uint8_t         level;
     struct timespec time_data;
     const char     *filename;
     int             line;
     const char     *function;
-    char            scope[CR_LOG_SCOPE_BUFFER];
-} cr_log_sink_meta_t;
+    const char     *scope;
+} cr_log_sink_event_t;
 
 typedef struct cr_log_sink_t {
-    void (*process)(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state);
+    void (*process)(void *sink_state, const cr_log_sink_event_t *event);
     void (*flush)(void *sink_state);
     void (*free)(void *sink_state);
     void *state;
@@ -149,22 +150,25 @@ typedef struct cr_log_sink_t {
 void cr_log_sink_add(cr_log_sink_t sink);
 
 // ** file sink
-struct cr_log_sink_file_config_t {
+typedef struct cr_log_sink_file_config_t {
     const char    *target;
     const FILE    *file;
     bool           truncate;
     bool           disable_close;
     bool           color;
     cr_log_level_t level;
+
     // -1 to disable, 0 to use default, >0 to set custom buffer size
     ssize_t ibuffer_size;
-};
+
+    int (*formatter)(
+        char *buf, size_t size, const cr_log_sink_event_t *event, const struct cr_log_sink_file_config_t *config);
+} cr_log_sink_file_config_t;
 
 #define cr_log_sink_file(...) cr_log_sink_file_new((struct cr_log_sink_file_config_t) { __VA_ARGS__ })
 #define cr_log_sink_default()                                                                                          \
-    cr_log_sink_file_new((struct cr_log_sink_file_config_t) { .file = stderr, .color = true, .ibuffer_size = -1 })
-#define cr_log_sink_filep(filep, ...)                                                                                  \
-    cr_log_sink_file_new((struct cr_log_sink_file_config_t) { .file = filep, __VA_ARGS__ })
+    cr_log_sink_file_new((struct cr_log_sink_file_config_t) {                                                          \
+        .file = stderr, .color = true, .ibuffer_size = -1, .disable_close = true })
 
 cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 
@@ -248,19 +252,17 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
         return;
     }
 
-    cr_log_sink_meta_t meta = {
+    cr_log_sink_event_t event = {
+        .message   = logger_state.buffer,
         .level     = level,
         .time_data = { 0 },
         .filename  = file,
         .line      = line,
         .function  = func,
-        .scope     = { 0 },
+        .scope     = cr_log__scope_get(),
     };
 
-    clock_gettime(CLOCK_REALTIME_COARSE, &meta.time_data);
-    if (cr_log__scope_stack.depth > 0) {
-        strncpy(meta.scope, cr_log__scope_get(), CR_LOG_SCOPE_BUFFER);
-    }
+    clock_gettime(CLOCK_REALTIME_COARSE, &event.time_data);
 
     pthread_mutex_lock(&logger_state.lock);
 
@@ -270,7 +272,7 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
     va_end(args);
 
     for (int i = 0; i < (int)logger_state.sink_count; i++) {
-        logger_state.sinks[i].process(logger_state.buffer, &meta, logger_state.sinks[i].state);
+        logger_state.sinks[i].process(logger_state.sinks[i].state, &event);
     }
 
     pthread_mutex_unlock(&logger_state.lock);
@@ -332,6 +334,7 @@ cr_log_sink_add(cr_log_sink_t sink)
 }
 
 // ** File sink
+#define CR_LOG_SINK_FILE_FORMAT_MAX 256
 typedef struct cr_log_sink_file_state_t {
     struct cr_log_sink_file_config_t config;
     FILE                            *file_stream;
@@ -341,7 +344,9 @@ typedef struct cr_log_sink_file_state_t {
 } cr_log_sink_file_state_t;
 
 void cr_log__sink_file_flush(void *sink_state);
-void cr_log__sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state);
+void cr_log__sink_file_process(void *state, const cr_log_sink_event_t *event);
+int  cr_log__sink_file_format(
+    char *buffer, size_t size, const cr_log_sink_event_t *event, const struct cr_log_sink_file_config_t *config);
 void cr_log__sink_file_free(void *sink_state);
 
 cr_log_sink_t
@@ -371,18 +376,24 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
         return (cr_log_sink_t) { 0 };
     }
 
-    // allocate internal buffer
     if (config.ibuffer_size < 0) {
+        // disable buffering
         state->buffer      = nullptr;
         state->buffer_size = 0;
         (void)setvbuf(state->file_stream, nullptr, _IONBF, 0);
     } else {
+        // allocate internal buffer
         state->buffer_size = (config.ibuffer_size == 0) ? CR_LOG_SINK_FILE_BUFFER : (size_t)config.ibuffer_size;
         state->buffer      = (char *)malloc(state->buffer_size);
         if (!state->buffer) {
             perror("(malloc) file sink buffer allocation failed");
             return (cr_log_sink_t) { 0 };
         }
+    }
+
+    if (!config.formatter) {
+        // use default formatter
+        config.formatter = cr_log__sink_file_format;
     }
 
     state->offset = 0;
@@ -396,57 +407,50 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
     };
 }
 
+int
+cr_log__sink_file_format(
+    char *buf, size_t size, const cr_log_sink_event_t *event, const struct cr_log_sink_file_config_t *config)
+{
+    int color = (int)config->color;
+    return snprintf(
+        buf,
+        size,
+        "[%ld.%ld] [%s%s%s] [%s] [%s:%d %s] ",
+        // time
+        event->time_data.tv_sec,
+        event->time_data.tv_nsec,
+        // level
+        color ? cr_log_colors[event->level] : "",
+        cr_log_level_names[event->level],
+        color ? cr_log_reset : "",
+        // scope
+        event->scope[0] == '\0' ? " " : event->scope,
+        // location
+        event->filename,
+        event->line,
+        event->function);
+}
+
 void
-cr_log__sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void *sink_state)
+cr_log__sink_file_process(void *sink_state, const cr_log_sink_event_t *event)
 {
     cr_log_sink_file_state_t *state = sink_state;
-    if (meta->level < state->config.level) {
+    if (event->level < state->config.level) {
         return;
     }
 
-    char   buf[256];
-    size_t buf_offset = 0;
-
-    // time
-    struct tm *time_info = localtime(&meta->time_data.tv_sec);
-    buf_offset += strftime(buf, sizeof(buf), "[%Y-%m-%d %H:%M:%S", time_info);
-    buf_offset
-        += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, ".%03ld] ", meta->time_data.tv_nsec / 1000000);
-
-    // level
-    if (state->config.color) {
-        buf_offset += (size_t)snprintf(
-            buf + buf_offset,
-            sizeof(buf) - buf_offset,
-            "[%s%s%s] ",
-            cr_log_colors[meta->level],
-            cr_log_level_names[meta->level],
-            cr_log_reset);
-    } else {
-        buf_offset
-            += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, "[%s] ", cr_log_level_names[meta->level]);
-    }
-
-    // scope
-    if (meta->scope[0] != '\0') {
-        buf_offset += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, "[%s] ", meta->scope);
-    } else {
-        buf_offset += (size_t)snprintf(buf + buf_offset, sizeof(buf) - buf_offset, "[ ] ");
-    }
-
-    // location
-    buf_offset += (size_t)snprintf(
-        buf + buf_offset, sizeof(buf) - buf_offset, "[%s:%d %s] ", meta->filename, meta->line, meta->function);
+    char buf[CR_LOG_SINK_FILE_FORMAT_MAX];
+    state->config.formatter(buf, sizeof(buf), event, &state->config);
 
     if (state->buffer_size == 0) {
         // bypass buffer, write directly
-        (void)fprintf(state->file_stream, "%s%s\n", buf, msg);
+        (void)fprintf(state->file_stream, "%s%s\n", buf, event->message);
         return;
     }
 
     // try
-    int offset
-        = snprintf(state->buffer + state->offset, state->buffer_size - (size_t)state->offset, "%s%s\n", buf, msg);
+    int offset = snprintf(
+        state->buffer + state->offset, state->buffer_size - (size_t)state->offset, "%s%s\n", buf, event->message);
 
     if (offset < 0) {
         perror("(snprintf) failed to append to file sink buffer");
@@ -456,15 +460,15 @@ cr_log__sink_file_process(const char *msg, const cr_log_sink_meta_t *meta, void 
     if (offset > (int)state->buffer_size) {
         // larger than buffer, write through
         cr_log__sink_file_flush(sink_state);
-        (void)fprintf(state->file_stream, "%s", msg);
+        (void)fprintf(state->file_stream, "%s%s\n", buf, event->message);
         return;
     }
 
     if (state->offset + offset >= (int)state->buffer_size) {
         // buffer overflow, flush and retry
         cr_log__sink_file_flush(sink_state);
-        int ret
-            = snprintf(state->buffer + state->offset, state->buffer_size - (size_t)state->offset, "%s%s\n", buf, msg);
+        int ret = snprintf(
+            state->buffer + state->offset, state->buffer_size - (size_t)state->offset, "%s%s\n", buf, event->message);
 
         if (ret < 0) {
             perror("(snprintf) failed to append to file sink buffer");
