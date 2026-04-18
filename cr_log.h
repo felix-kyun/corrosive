@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.6.0 - Logging Library
+    cr_log.h - v0.6.1 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -14,12 +14,8 @@
 #define CR_LOG_H
 
 #define _POSIX_C_SOURCE 202405L
-#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
 
 #define CR_LOG_LEVEL_TRACE 0
 #define CR_LOG_LEVEL_DEBUG 1
@@ -125,10 +121,6 @@ void cr_log(cr_log_level_t level, const char *file, int line, const char *func, 
 void cr_log_set_level(cr_log_level_t level);
 
 // * scope
-#ifndef CR_LOG_SCOPE_DISABLE
-#define cr_log_scope_push(scope) cr_log__scope_push(scope)
-#define cr_log_scope_pop()       cr_log__scope_pop()
-
 _Thread_local struct {
     int  depth;
     char buffer[CR_LOG_SCOPE_BUFFER];
@@ -136,33 +128,10 @@ _Thread_local struct {
     int  buffer_offsets[CR_LOG_SCOPE_MAX_SIZE];
 } cr_log__scope_stack = { 0 };
 
-void        cr_log__scope_push(const char *scope);
-void        cr_log__scope_pop(void);
-const char *cr_log__scope_get(void);
-#else
-#define cr_log_scope_push(scope) ((void)0)
-#define cr_log_scope_pop()       ((void)0)
-#endif
+void cr_log_scope_push(const char *scope);
+void cr_log_scope_pop(void);
 
-// clang-format off
-static constexpr size_t buffer_size
-    = CR_LOG_QUEUE_ITEM_SIZE
-    - (sizeof(atomic_size_t)
-    + (sizeof(uint_fast32_t) * 2)
-    + sizeof(struct timespec)
-    + (sizeof(const char *) * 2)
-    + CR_LOG_SCOPE_MAX_SIZE);
-// clang-format on
-
-typedef struct cr_log_item_t {
-    uint8_t         level;
-    uint32_t        line;
-    const char     *filename;
-    const char     *function;
-    struct timespec time;
-    char            scope[CR_LOG_SCOPE_MAX_SIZE];
-    char            buffer[buffer_size];
-} cr_log_item_t;
+typedef struct cr_log_item_t cr_log_item_t;
 
 // * sinks
 typedef struct cr_log_sink_t {
@@ -203,7 +172,11 @@ cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdarg.h>
+#include <stdatomic.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -240,9 +213,29 @@ static const char* cr_log_level_names[] = {
 };
 // clang-format on
 
-// queue
-constexpr size_t queue_size = 1 << CR_LOG_QUEUE_SIZE_POWER;
-void             queue_consumer(struct cr_log_item_t *item);
+// internal api
+void        queue_consumer(struct cr_log_item_t *item);
+const char *cr_log__scope_get(void);
+
+// clang-format off
+static constexpr size_t buffer_size
+    = CR_LOG_QUEUE_ITEM_SIZE
+    - (sizeof(atomic_size_t)
+    + (sizeof(uint_fast32_t) * 2)
+    + sizeof(struct timespec)
+    + (sizeof(const char *) * 2)
+    + CR_LOG_SCOPE_MAX_SIZE);
+// clang-format on
+
+typedef struct cr_log_item_t {
+    uint8_t         level;
+    uint32_t        line;
+    const char     *filename;
+    const char     *function;
+    struct timespec time;
+    char            scope[CR_LOG_SCOPE_MAX_SIZE];
+    char            buffer[buffer_size];
+} cr_log_item_t;
 
 struct item {
     alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
@@ -259,7 +252,7 @@ struct queue {
     pthread_t consumer_thread;
     sem_t     items;
 
-    struct item buffer[queue_size];
+    struct item buffer[1 << CR_LOG_QUEUE_SIZE_POWER];
 } queue;
 
 static_assert(sizeof(struct item) == CR_LOG_QUEUE_ITEM_SIZE, "item too large");
