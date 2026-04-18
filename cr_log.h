@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.6.1 - Logging Library
+    cr_log.h - v0.6.2 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -218,6 +218,7 @@ void        queue_consumer(struct cr_log_item_t *item);
 const char *cr_log__scope_get(void);
 
 // clang-format off
+static constexpr size_t queue_size = 1 << CR_LOG_QUEUE_SIZE_POWER;
 static constexpr size_t buffer_size
     = CR_LOG_QUEUE_ITEM_SIZE
     - (sizeof(atomic_size_t)
@@ -252,7 +253,7 @@ struct queue {
     pthread_t consumer_thread;
     sem_t     items;
 
-    struct item buffer[1 << CR_LOG_QUEUE_SIZE_POWER];
+    struct item buffer[queue_size];
 } queue;
 
 static_assert(sizeof(struct item) == CR_LOG_QUEUE_ITEM_SIZE, "item too large");
@@ -430,7 +431,7 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
 
 // * Scope
 void
-cr_log__scope_push(const char *scope)
+cr_log_scope_push(const char *scope)
 {
     auto stack = &cr_log__scope_stack;
     if (likely(stack->depth < CR_LOG_SCOPE_MAX_SIZE)) {
@@ -457,7 +458,7 @@ cr_log__scope_push(const char *scope)
 }
 
 void
-cr_log__scope_pop(void)
+cr_log_scope_pop(void)
 {
     auto stack = &cr_log__scope_stack;
     if (stack->depth <= 0) {
