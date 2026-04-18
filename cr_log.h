@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.6.2 - Logging Library
+    cr_log.h - v0.7.0 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -41,12 +41,8 @@
 #define CR_LOG_SINK_FILE_BUFFER 10240
 #endif
 
-#ifndef CR_LOG_SCOPE_MAX_SIZE
-#define CR_LOG_SCOPE_MAX_SIZE 16
-#endif
-
-#ifndef CR_LOG_SCOPE_BUFFER
-#define CR_LOG_SCOPE_BUFFER 256
+#ifndef CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER
+#define CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER 8
 #endif
 
 #ifndef CR_LOG_QUEUE_SIZE_POWER
@@ -121,19 +117,11 @@ void cr_log(cr_log_level_t level, const char *file, int line, const char *func, 
 void cr_log_set_level(cr_log_level_t level);
 
 // * scope
-_Thread_local struct {
-    int  depth;
-    char buffer[CR_LOG_SCOPE_BUFFER];
-    int  buffer_length;
-    int  buffer_offsets[CR_LOG_SCOPE_MAX_SIZE];
-} cr_log__scope_stack = { 0 };
-
-void cr_log_scope_push(const char *scope);
-void cr_log_scope_pop(void);
-
-typedef struct cr_log_item_t cr_log_item_t;
+thread_local int64_t scope_id = 0;
+void                 cr_log_scope_set(const char *scope);
 
 // * sinks
+typedef struct cr_log_item_t cr_log_item_t;
 typedef struct cr_log_sink_t {
     void (*process)(void *sink_state, const cr_log_item_t *item);
     void (*flush)(void *sink_state);
@@ -214,8 +202,7 @@ static const char* cr_log_level_names[] = {
 // clang-format on
 
 // internal api
-void        queue_consumer(struct cr_log_item_t *item);
-const char *cr_log__scope_get(void);
+void queue_consumer(struct cr_log_item_t *item);
 
 // clang-format off
 static constexpr size_t queue_size = 1 << CR_LOG_QUEUE_SIZE_POWER;
@@ -225,7 +212,7 @@ static constexpr size_t buffer_size
     + (sizeof(uint_fast32_t) * 2)
     + sizeof(struct timespec)
     + (sizeof(const char *) * 2)
-    + CR_LOG_SCOPE_MAX_SIZE);
+    + sizeof(int64_t));
 // clang-format on
 
 typedef struct cr_log_item_t {
@@ -233,8 +220,9 @@ typedef struct cr_log_item_t {
     uint32_t        line;
     const char     *filename;
     const char     *function;
+    const char     *scope;
     struct timespec time;
-    char            scope[CR_LOG_SCOPE_MAX_SIZE];
+    int64_t         scope_id;
     char            buffer[buffer_size];
 } cr_log_item_t;
 
@@ -256,6 +244,16 @@ struct queue {
 
     struct item buffer[queue_size];
 } queue;
+
+static struct intern_table_t {
+    pthread_rwlock_t lock;
+    struct {
+        uint64_t hash;
+        char    *key;
+        bool     used;
+    } items[1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER];
+    uint64_t mask;
+} itable;
 
 static_assert(sizeof(struct item) == CR_LOG_QUEUE_ITEM_SIZE, "item too large");
 static_assert(alignof(struct item) == CACHE_LINE_SIZE, "alignment broken");
@@ -372,6 +370,12 @@ cr_log_init(void)
     atomic_init(&queue.write, 0);
     atomic_init(&queue.shutdown, false);
     sem_init(&queue.items, 0, 0);
+
+    // intern table
+    itable.mask = (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER) - 1;
+    pthread_rwlock_init(&itable.lock, NULL);
+
+    // spawn consumer thread
     pthread_create(&queue.consumer_thread, NULL, dequeue, NULL);
 }
 
@@ -392,21 +396,26 @@ cr_log_flush(void)
 void
 cr_log_free(void)
 {
+    // signal and wait for consumer thread to finish
     atomic_store_relaxed(&queue.shutdown, true);
     sem_post(&queue.items);
     pthread_join(queue.consumer_thread, NULL);
     sem_destroy(&queue.items);
 
+    // free intern table
+    pthread_rwlock_wrlock(&itable.lock);
+    for (int i = 0; i < (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER); i++) {
+        if (itable.items[i].used) {
+            free(itable.items[i].key);
+            itable.items[i].used = false;
+        }
+    }
+    pthread_rwlock_unlock(&itable.lock);
+    pthread_rwlock_destroy(&itable.lock);
+
+    // free sinks
     for (int i = 0; i < (int)logger_state.sink_count; i++) {
         logger_state.sinks[i].free(logger_state.sinks[i].state);
-    }
-}
-
-void
-queue_consumer(struct cr_log_item_t *item)
-{
-    for (int i = 0; i < (int)logger_state.sink_count; i++) {
-        logger_state.sinks[i].process(logger_state.sinks[i].state, item);
     }
 }
 
@@ -426,11 +435,9 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
         .filename  = file,
         .line      = (uint32_t)line,
         .function  = func,
+        .scope_id = scope_id
     };
     // clang-format on
-
-    strncpy(event.scope, cr_log__scope_get(), CR_LOG_SCOPE_MAX_SIZE - 1);
-    event.scope[CR_LOG_SCOPE_MAX_SIZE - 1] = '\0';
 
     clock_gettime(CLOCK_REALTIME_COARSE, &event.time);
 
@@ -443,49 +450,64 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
 }
 
 // * Scope
-void
-cr_log_scope_push(const char *scope)
+#define FNV1A_64_PRIME  0x00000100000001b3ULL
+#define FNV1A_64_OFFSET 0xcbf29ce484222325ULL
+
+static inline uint64_t
+hash_string(const char *_key)
 {
-    auto stack = &cr_log__scope_stack;
-    if (likely(stack->depth < CR_LOG_SCOPE_MAX_SIZE)) {
-        // save reset point
-        stack->buffer_offsets[stack->depth] = stack->buffer_length;
+    uint8_t *key  = (uint8_t *)_key;
+    uint64_t hash = FNV1A_64_OFFSET;
+    while (*key) {
+        hash ^= *key++;
+        hash *= FNV1A_64_PRIME;
+    }
 
-        int written = snprintf(
-            stack->buffer + stack->buffer_length,
-            (size_t)(CR_LOG_SCOPE_BUFFER - stack->buffer_length),
-            "%s%s",
-            stack->depth == 0 ? "" : "::",
-            scope);
+    return hash;
+}
 
-        if (likely(stack->buffer_length + written < CR_LOG_SCOPE_BUFFER)) {
-            stack->buffer_length += written;
-        } else if (unlikely(written > 0)) {
-            err("(scope_push) Scope buffer overflow: %s", scope);
+void
+cr_log_scope_set(const char *scope)
+{
+    auto     hash       = hash_string(scope);
+    uint64_t idx        = hash & itable.mask;
+    bool     write_mode = false;
+    pthread_rwlock_rdlock(&itable.lock);
+    for (int i = 0; i < (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER); i++) {
+        auto entry = &itable.items[idx];
+        if (!entry->used) {
+            if (!write_mode) {
+                pthread_rwlock_unlock(&itable.lock);
+                // upgrade to write lock and recheck
+                pthread_rwlock_wrlock(&itable.lock);
+                write_mode = true;
+                idx        = hash & itable.mask;
+                i          = -1;
+                continue;
+            }
+
+            entry->key = strdup(scope);
+            if (!entry->key) {
+                scope_id = -1;
+                goto cleanup;
+            }
+
+            entry->hash = hash;
+            entry->used = true;
+            scope_id    = (int64_t)idx;
+            goto cleanup;
+        } else if (entry->hash == hash && strcmp(entry->key, scope) == 0) {
+            scope_id = (int64_t)idx;
+            goto cleanup;
         } else {
-            err("(scope_push) Failed to push scope %s", scope);
+            idx = (idx + 1) & itable.mask;
         }
-
-        stack->depth++;
     }
-}
+    // ignore scope at this level as we ran out of space
+    scope_id = -1;
 
-void
-cr_log_scope_pop(void)
-{
-    auto stack = &cr_log__scope_stack;
-    if (stack->depth <= 0) {
-        return;
-    }
-    stack->depth--;
-    stack->buffer_length                = stack->buffer_offsets[stack->depth];
-    stack->buffer[stack->buffer_length] = '\0';
-}
-
-const char *
-cr_log__scope_get(void)
-{
-    return cr_log__scope_stack.buffer;
+cleanup:
+    pthread_rwlock_unlock(&itable.lock);
 }
 
 // * Sinks
@@ -667,6 +689,28 @@ cr_log__sink_file_free(void *sink_state)
 
     free(state->buffer);
     free(state);
+}
+
+// consumer
+static inline const char *
+cr_log__scope_get(int64_t sid)
+{
+    if (sid == -1) {
+        return "";
+    }
+    pthread_rwlock_rdlock(&itable.lock);
+    const char *result = itable.items[sid].key;
+    pthread_rwlock_unlock(&itable.lock);
+    return result;
+}
+
+void
+queue_consumer(struct cr_log_item_t *item)
+{
+    item->scope = cr_log__scope_get(item->scope_id);
+    for (int i = 0; i < (int)logger_state.sink_count; i++) {
+        logger_state.sinks[i].process(logger_state.sinks[i].state, item);
+    }
 }
 // }}}
 // }}}
