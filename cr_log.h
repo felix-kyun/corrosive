@@ -249,9 +249,10 @@ struct queue {
     atomic_size_t read;
     char          pad2[CACHE_LINE_SIZE - sizeof(atomic_size_t)];
 
-    size_t    mask;
-    pthread_t consumer_thread;
-    sem_t     items;
+    size_t      mask;
+    sem_t       items;
+    pthread_t   consumer_thread;
+    atomic_bool shutdown;
 
     struct item buffer[queue_size];
 } queue;
@@ -296,7 +297,8 @@ enqueue(struct cr_log_item_t meta)
         int ret = enqueue_(&meta);
         if (ret == 0) {
             return 0;
-        } else if (ret == -1) {
+        }
+        if (ret == -1) {
             // spin and retry
             // exponential backoff
             for (int j = 0; j < backoff; j++) {
@@ -342,6 +344,11 @@ dequeue([[maybe_unused]] void *arg)
                 break;
             }
         }
+
+        if (atomic_load_relaxed(&queue.shutdown)) {
+            while (try_dequeue() == 0) { }
+            break;
+        }
     }
 
     return NULL;
@@ -363,6 +370,8 @@ cr_log_init(void)
     queue.mask = queue_size - 1;
     atomic_init(&queue.read, 0);
     atomic_init(&queue.write, 0);
+    atomic_init(&queue.shutdown, false);
+    sem_init(&queue.items, 0, 0);
     pthread_create(&queue.consumer_thread, NULL, dequeue, NULL);
 }
 
@@ -383,7 +392,11 @@ cr_log_flush(void)
 void
 cr_log_free(void)
 {
+    atomic_store_relaxed(&queue.shutdown, true);
+    sem_post(&queue.items);
     pthread_join(queue.consumer_thread, NULL);
+    sem_destroy(&queue.items);
+
     for (int i = 0; i < (int)logger_state.sink_count; i++) {
         logger_state.sinks[i].free(logger_state.sinks[i].state);
     }
