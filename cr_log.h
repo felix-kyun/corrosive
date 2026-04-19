@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.7.0 - Logging Library
+    cr_log.h - v0.7.1 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -610,7 +610,7 @@ cr_log__sink_file_format(
         cr_log_level_names[item->level],
         color ? cr_log_reset : "",
         // scope
-        item->scope[0] == '\0' ? " " : item->scope,
+        item->scope,
         // location
         item->filename,
         item->line,
