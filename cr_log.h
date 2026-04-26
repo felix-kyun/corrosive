@@ -29,10 +29,6 @@
 #define CR_LOG_SINK_LIMIT 8
 #endif
 
-#ifndef CR_LOG_BUFFER_SIZE
-#define CR_LOG_BUFFER_SIZE 2048
-#endif
-
 #ifndef CR_LOG_PURGE_LEVEL
 #define CR_LOG_PURGE_LEVEL CR_LOG_LEVEL_TRACE
 #endif
@@ -58,7 +54,7 @@
 #endif
 
 #ifndef CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
-#define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 256
+#define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 1024
 #endif
 
 #define CACHE_LINE_SIZE 64
@@ -108,9 +104,10 @@
 
 typedef uint8_t cr_log_level_t;
 
-void cr_log_init(void);
-void cr_log_flush(void);
-void cr_log_free(void);
+void     cr_log_init(void);
+void     cr_log_flush(void);
+void     cr_log_free(void);
+uint64_t cr_log_get_dropped(void);
 
 [[gnu::hot, gnu::format(__printf__, 5, 6)]]
 void cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
@@ -159,6 +156,7 @@ cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 #include <immintrin.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <stdalign.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -205,13 +203,14 @@ static const char* cr_log_level_names[] = {
 void queue_consumer(struct cr_log_item_t *item);
 
 // clang-format off
+alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
 static constexpr size_t queue_size = 1 << CR_LOG_QUEUE_SIZE_POWER;
 static constexpr size_t buffer_size
     = CR_LOG_QUEUE_ITEM_SIZE
     - (sizeof(atomic_size_t)
     + (sizeof(uint_fast32_t) * 2)
     + sizeof(struct timespec)
-    + (sizeof(const char *) * 2)
+    + (sizeof(const char *) * 3)
     + sizeof(int64_t));
 // clang-format on
 
@@ -307,6 +306,7 @@ enqueue(struct cr_log_item_t meta)
     }
 
     // drop
+    atomic_fetch_add(&drop_count, 1);
     return -1;
 }
 
@@ -371,6 +371,8 @@ cr_log_init(void)
     atomic_init(&queue.shutdown, false);
     sem_init(&queue.items, 0, 0);
 
+    atomic_init(&drop_count, 0);
+
     // intern table
     itable.mask = (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER) - 1;
     pthread_rwlock_init(&itable.lock, NULL);
@@ -417,6 +419,12 @@ cr_log_free(void)
     for (int i = 0; i < (int)logger_state.sink_count; i++) {
         logger_state.sinks[i].free(logger_state.sinks[i].state);
     }
+}
+
+uint64_t
+cr_log_get_dropped()
+{
+    return atomic_load(&drop_count);
 }
 
 void
