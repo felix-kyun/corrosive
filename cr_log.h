@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.7.2 - Logging Library
+    cr_log.h - v0.7.3 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -117,8 +117,8 @@ void cr_log(cr_log_level_t level, const char *file, int line, const char *func, 
 void cr_log_set_level(cr_log_level_t level);
 
 // * scope
-thread_local int64_t scope_id = 0;
-void                 cr_log_scope_set(const char *scope);
+extern thread_local int64_t scope_id;
+void                        cr_log_scope_set(const char *scope);
 
 // * sinks
 typedef struct cr_log_item_t cr_log_item_t;
@@ -205,8 +205,13 @@ static const char* cr_log_level_names[] = {
 // internal api
 void queue_consumer(struct cr_log_item_t *item);
 
-// clang-format off
+#ifdef CR_LOG_TELEMETRY
+alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
+#endif
+
+thread_local int64_t    scope_id   = 0;
 static constexpr size_t queue_size = 1 << CR_LOG_QUEUE_SIZE_POWER;
+// clang-format off
 static constexpr size_t buffer_size
     = CR_LOG_QUEUE_ITEM_SIZE
     - (sizeof(atomic_size_t)
@@ -255,10 +260,6 @@ static struct intern_table_t {
     } items[1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER];
     uint64_t mask;
 } itable;
-
-#ifdef CR_LOG_TELEMETRY
-alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
-#endif
 
 static_assert(sizeof(struct item) == CR_LOG_QUEUE_ITEM_SIZE, "item too large");
 static_assert(alignof(struct item) == CACHE_LINE_SIZE, "alignment broken");
