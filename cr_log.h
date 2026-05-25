@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.7.1 - Logging Library
+    cr_log.h - v0.7.2 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -104,10 +104,13 @@
 
 typedef uint8_t cr_log_level_t;
 
-void     cr_log_init(void);
-void     cr_log_flush(void);
-void     cr_log_free(void);
+void cr_log_init(void);
+void cr_log_flush(void);
+void cr_log_free(void);
+
+#ifdef CR_LOG_TELEMETRY
 uint64_t cr_log_get_dropped(void);
+#endif
 
 [[gnu::hot, gnu::format(__printf__, 5, 6)]]
 void cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
@@ -203,7 +206,6 @@ static const char* cr_log_level_names[] = {
 void queue_consumer(struct cr_log_item_t *item);
 
 // clang-format off
-alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
 static constexpr size_t queue_size = 1 << CR_LOG_QUEUE_SIZE_POWER;
 static constexpr size_t buffer_size
     = CR_LOG_QUEUE_ITEM_SIZE
@@ -253,6 +255,10 @@ static struct intern_table_t {
     } items[1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER];
     uint64_t mask;
 } itable;
+
+#ifdef CR_LOG_TELEMETRY
+alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
+#endif
 
 static_assert(sizeof(struct item) == CR_LOG_QUEUE_ITEM_SIZE, "item too large");
 static_assert(alignof(struct item) == CACHE_LINE_SIZE, "alignment broken");
@@ -306,7 +312,9 @@ enqueue(struct cr_log_item_t meta)
     }
 
     // drop
+#ifdef CR_LOG_TELEMETRY
     atomic_fetch_add(&drop_count, 1);
+#endif
     return -1;
 }
 
@@ -371,7 +379,9 @@ cr_log_init(void)
     atomic_init(&queue.shutdown, false);
     sem_init(&queue.items, 0, 0);
 
+#ifdef CR_LOG_TELEMETRY
     atomic_init(&drop_count, 0);
+#endif
 
     // intern table
     itable.mask = (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER) - 1;
@@ -421,11 +431,13 @@ cr_log_free(void)
     }
 }
 
+#ifdef CR_LOG_TELEMETRY
 uint64_t
 cr_log_get_dropped()
 {
     return atomic_load(&drop_count);
 }
+#endif
 
 void
 cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...)
