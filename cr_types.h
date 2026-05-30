@@ -1,5 +1,5 @@
 /*
-    cr_types.h - v0.0.1 - Type Conventions
+    cr_types.h - v0.0.2 - Type Conventions
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -13,6 +13,7 @@
 #ifndef CR_TYPES_H
 #define CR_TYPES_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -32,7 +33,9 @@ typedef uint8_t byte;
 
 typedef size_t    usize;
 typedef ptrdiff_t isize;
+typedef uintptr_t uptr;
+typedef intptr_t  iptr;
 
-typedef _Bool b8;
+typedef bool b8;
 
 #endif /* CR_TYPES_H */
