@@ -1,6 +1,6 @@
 # Makefile
 CC := clang
-CFLAGS := -Wall -Wextra -Werror -pedantic -std=c23 \
+CFLAGS := -Wall -Wextra -Werror -std=gnu23 \
 	-Wshadow -Wconversion -Wnull-dereference -Wformat=2 -Wundef \
 	-g -fsanitize=address,undefined,leak -O0 \
 	-DCORROSIVE_IMPLEMENTATION
