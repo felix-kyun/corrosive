@@ -156,6 +156,8 @@ cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
+/* Implementation */
+
 #include <immintrin.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -166,6 +168,13 @@ cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
+
+typedef uint8_t  u8;
+typedef int32_t  i32;
+typedef uint32_t u32;
+typedef int64_t  i64;
+typedef uint64_t u64;
+typedef size_t   usize;
 
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -209,26 +218,30 @@ void queue_consumer(struct cr_log_item_t *item);
 alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
 #endif
 
+// clang-format off
 thread_local int64_t    scope_id   = 0;
 static constexpr size_t queue_size = 1 << CR_LOG_QUEUE_SIZE_POWER;
-// clang-format off
 static constexpr size_t buffer_size
-    = CR_LOG_QUEUE_ITEM_SIZE
-    - (sizeof(atomic_size_t)
-    + (sizeof(uint_fast32_t) * 2)
-    + sizeof(struct timespec)
-    + (sizeof(const char *) * 3)
-    + sizeof(int64_t));
+    = CR_LOG_QUEUE_ITEM_SIZE - (0
+    + CACHE_LINE_SIZE			// sequence
+    + sizeof(u8) 			// level
+    + sizeof(u32) 			// line
+    + sizeof(const char *)		// filename
+    + sizeof(const char *)		// function
+    + sizeof(const char *)		// scope
+    + sizeof(struct timespec)	// time
+    + sizeof(i64)			// scope_id
+    );
 // clang-format on
 
 typedef struct cr_log_item_t {
-    uint8_t         level;
-    uint32_t        line;
+    u8              level;
+    u32             line;
     const char     *filename;
     const char     *function;
     const char     *scope;
     struct timespec time;
-    int64_t         scope_id;
+    i64             scope_id;
     char            buffer[buffer_size];
 } cr_log_item_t;
 
@@ -243,7 +256,7 @@ struct queue {
     atomic_size_t read;
     char          pad2[CACHE_LINE_SIZE - sizeof(atomic_size_t)];
 
-    size_t      mask;
+    usize       mask;
     sem_t       items;
     pthread_t   consumer_thread;
     atomic_bool shutdown;
@@ -254,9 +267,9 @@ struct queue {
 static struct intern_table_t {
     pthread_rwlock_t lock;
     struct {
-        uint64_t hash;
-        char    *key;
-        bool     used;
+        u64   hash;
+        char *key;
+        bool  used;
     } items[1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER];
     uint64_t mask;
 } itable;
@@ -268,9 +281,9 @@ int
 enqueue_(struct cr_log_item_t *meta)
 {
     for (;;) {
-        size_t write_pos = atomic_load_relaxed(&queue.write);
-        size_t idx       = write_pos & queue.mask;
-        size_t seq       = atomic_load_relaxed(&queue.buffer[idx].sequence);
+        usize write_pos = atomic_load_relaxed(&queue.write);
+        usize idx       = write_pos & queue.mask;
+        usize seq       = atomic_load_relaxed(&queue.buffer[idx].sequence);
 
         // check availablity
         if (write_pos - seq == 0) {
@@ -295,17 +308,17 @@ enqueue_(struct cr_log_item_t *meta)
 int
 enqueue(struct cr_log_item_t meta)
 {
-    int backoff = 1;
+    i32 backoff = 1;
 
     for (int i = 0; i < CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS; i++) {
-        int ret = enqueue_(&meta);
+        i32 ret = enqueue_(&meta);
         if (ret == 0) {
             return 0;
         }
         if (ret == -1) {
             // spin and retry
             // exponential backoff
-            for (int j = 0; j < backoff; j++) {
+            for (i32 j = 0; j < backoff; j++) {
                 _mm_pause();
             }
             backoff = (backoff < CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF) ? backoff << 1 : CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF;
@@ -322,10 +335,10 @@ enqueue(struct cr_log_item_t meta)
 int
 try_dequeue(void)
 {
-    size_t read_pos = atomic_load_relaxed(&queue.read);
-    size_t idx      = read_pos & queue.mask;
-    size_t seq      = atomic_load_acquire(&queue.buffer[idx].sequence);
-    long   diff     = (long)seq - (long)(read_pos + 1);
+    usize read_pos = atomic_load_relaxed(&queue.read);
+    usize idx      = read_pos & queue.mask;
+    usize seq      = atomic_load_acquire(&queue.buffer[idx].sequence);
+    i64   diff     = (i64)(seq - read_pos + 1);
 
     if (diff == 0) {
         // consume
@@ -364,14 +377,14 @@ dequeue([[maybe_unused]] void *arg)
 static struct {
     cr_log_level_t level;
     cr_log_sink_t  sinks[CR_LOG_SINK_LIMIT];
-    size_t         sink_count;
+    usize          sink_count;
 } logger_state = { 0 };
 
 void
 cr_log_init(void)
 {
     logger_state.level = CR_LOG_LEVEL_INFO;
-    for (size_t i = 0; i < queue_size; i++) {
+    for (usize i = 0; i < queue_size; i++) {
         atomic_init(&queue.buffer[i].sequence, i);
     }
     queue.mask = queue_size - 1;
@@ -401,7 +414,7 @@ cr_log_set_level(cr_log_level_t level)
 void
 cr_log_flush(void)
 {
-    for (int i = 0; i < (int)logger_state.sink_count; i++) {
+    for (usize i = 0; i < logger_state.sink_count; i++) {
         logger_state.sinks[i].flush(logger_state.sinks[i].state);
     }
 }
@@ -417,7 +430,7 @@ cr_log_free(void)
 
     // free intern table
     pthread_rwlock_wrlock(&itable.lock);
-    for (int i = 0; i < (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER); i++) {
+    for (i32 i = 0; i < (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER); i++) {
         if (itable.items[i].used) {
             free(itable.items[i].key);
             itable.items[i].used = false;
@@ -427,7 +440,7 @@ cr_log_free(void)
     pthread_rwlock_destroy(&itable.lock);
 
     // free sinks
-    for (int i = 0; i < (int)logger_state.sink_count; i++) {
+    for (usize i = 0; i < logger_state.sink_count; i++) {
         logger_state.sinks[i].free(logger_state.sinks[i].state);
     }
 }
@@ -441,7 +454,7 @@ cr_log_get_dropped()
 #endif
 
 void
-cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...)
+cr_log(cr_log_level_t level, const char *file, i32 line, const char *func, const char *fmt, ...)
 {
     // runtime purge
     if (level < logger_state.level) {
@@ -454,7 +467,7 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
         .level     = level,
         .time = { 0 },
         .filename  = file,
-        .line      = (uint32_t)line,
+        .line      = (u32)line,
         .function  = func,
         .scope_id = scope_id
     };
@@ -477,8 +490,8 @@ cr_log(cr_log_level_t level, const char *file, int line, const char *func, const
 static inline uint64_t
 hash_string(const char *_key)
 {
-    uint8_t *key  = (uint8_t *)_key;
-    uint64_t hash = FNV1A_64_OFFSET;
+    u8 *key  = (u8 *)_key;
+    u64 hash = FNV1A_64_OFFSET;
     while (*key) {
         hash ^= *key++;
         hash *= FNV1A_64_PRIME;
@@ -490,11 +503,11 @@ hash_string(const char *_key)
 void
 cr_log_scope_set(const char *scope)
 {
-    auto     hash       = hash_string(scope);
-    uint64_t idx        = hash & itable.mask;
-    bool     write_mode = false;
+    auto hash       = hash_string(scope);
+    u64  idx        = hash & itable.mask;
+    bool write_mode = false;
     pthread_rwlock_rdlock(&itable.lock);
-    for (int i = 0; i < (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER); i++) {
+    for (i32 i = 0; i < (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER); i++) {
         auto entry = &itable.items[idx];
         if (!entry->used) {
             if (!write_mode) {
@@ -546,14 +559,14 @@ typedef struct cr_log_sink_file_state_t {
     struct cr_log_sink_file_config_t config;
     FILE                            *file_stream;
     char                            *buffer;
-    size_t                           buffer_size;
-    int                              offset;
+    usize                            buffer_size;
+    i32                              offset;
 } cr_log_sink_file_state_t;
 
 void cr_log__sink_file_flush(void *sink_state);
 void cr_log__sink_file_process(void *state, const cr_log_item_t *item);
 int  cr_log__sink_file_format(
-    char *buffer, size_t size, const cr_log_item_t *item, const struct cr_log_sink_file_config_t *config);
+    char *buffer, usize size, const cr_log_item_t *item, const struct cr_log_sink_file_config_t *config);
 void cr_log__sink_file_free(void *sink_state);
 
 cr_log_sink_t
@@ -616,9 +629,9 @@ cr_log_sink_file_new(struct cr_log_sink_file_config_t config)
 
 int
 cr_log__sink_file_format(
-    char *buf, size_t size, const cr_log_item_t *item, const struct cr_log_sink_file_config_t *config)
+    char *buf, usize size, const cr_log_item_t *item, const struct cr_log_sink_file_config_t *config)
 {
-    int color = (int)config->color;
+    i32 color = (i32)config->color;
     return snprintf(
         buf,
         size,
@@ -729,7 +742,7 @@ void
 queue_consumer(struct cr_log_item_t *item)
 {
     item->scope = cr_log__scope_get(item->scope_id);
-    for (int i = 0; i < (int)logger_state.sink_count; i++) {
+    for (usize i = 0; i < logger_state.sink_count; i++) {
         logger_state.sinks[i].process(logger_state.sinks[i].state, item);
     }
 }
