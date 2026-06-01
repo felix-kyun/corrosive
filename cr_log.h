@@ -169,12 +169,13 @@ cr_log_sink_t cr_log_sink_file_new(struct cr_log_sink_file_config_t config);
 #include <sys/time.h>
 #include <time.h>
 
-typedef uint8_t  u8;
-typedef int32_t  i32;
-typedef uint32_t u32;
-typedef int64_t  i64;
-typedef uint64_t u64;
-typedef size_t   usize;
+typedef uint8_t   u8;
+typedef int32_t   i32;
+typedef uint32_t  u32;
+typedef int64_t   i64;
+typedef uint64_t  u64;
+typedef size_t    usize;
+typedef ptrdiff_t isize;
 
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -338,7 +339,7 @@ try_dequeue(void)
     usize read_pos = atomic_load_relaxed(&queue.read);
     usize idx      = read_pos & queue.mask;
     usize seq      = atomic_load_acquire(&queue.buffer[idx].sequence);
-    i64   diff     = (i64)(seq - read_pos + 1);
+    isize diff     = (isize)(seq - (read_pos + 1));
 
     if (diff == 0) {
         // consume
