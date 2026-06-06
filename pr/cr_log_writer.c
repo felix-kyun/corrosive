@@ -114,7 +114,7 @@ writer_write(writer_t *writer, const void *src, usize size)
         // bypass buffer
         usize written = 0;
         while (written < size) {
-            isize current_write = write(writer->fd, src, size);
+            isize current_write = write(writer->fd, src + written, size - written);
             if (current_write < 0) {
                 perror("write");
                 return;
