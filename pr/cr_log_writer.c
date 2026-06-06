@@ -32,6 +32,7 @@ void      writer_destroy(writer_t *writer);
 
 i32 writer_write(writer_t *writer, const void *src, usize size);
 i32 writer_i64(writer_t *writer, i64 value);
+i32 writer_u64(writer_t *writer, u64 value);
 i32 writer_str(writer_t *writer, const char *str);
 
 // internal
@@ -250,6 +251,46 @@ writer_i64(writer_t *writer, i64 value)
 
     if (value < 0) {
         *--idx = '-';
+    }
+
+    if (ibuffer == stack_buffer) {
+        return writer_write(writer, idx, (usize)(ibuffer + len - idx));
+    }
+
+    writer__advance(writer, len);
+    return 0;
+}
+
+i32
+writer_u64(writer_t *writer, u64 value)
+{
+    char stack_buffer[32];
+    // adjust to account for fast_log10 flooring
+    u8    len     = fast_log10(value) + 1;
+    char *ibuffer = writer__reserve(writer, len);
+
+    if (!ibuffer) {
+        ibuffer = stack_buffer;
+    }
+
+    char *idx = ibuffer + len;
+
+    if (value == 0) {
+        *--idx = '0';
+    }
+
+    while (value >= 10) {
+        u64 rem = value % 100;
+        value /= 100;
+        rem *= 2;
+
+        idx -= 2;
+        idx[0] = digit_pairs[rem];
+        idx[1] = digit_pairs[rem + 1];
+    }
+
+    if (value > 0) {
+        *--idx = (char)('0' + value);
     }
 
     if (ibuffer == stack_buffer) {
