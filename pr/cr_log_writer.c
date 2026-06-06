@@ -218,6 +218,10 @@ writer_write_i64(writer_t *writer, i64 value)
 
     char *idx = ibuffer + len;
 
+    if (uvalue == 0) {
+        *--idx = '0';
+    }
+
     while (uvalue >= 10) {
         u64 rem = uvalue % 100;
         uvalue /= 100;
