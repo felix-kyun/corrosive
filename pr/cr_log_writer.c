@@ -27,12 +27,12 @@ typedef struct writer_t {
 } writer_t;
 
 writer_t *writer_create(int target_fd, usize bsize);
-void      writer_flush(writer_t *writer);
+i32       writer_flush(writer_t *writer);
 void      writer_destroy(writer_t *writer);
 
-void writer_write(writer_t *writer, const void *src, usize size);
-void writer_i64(writer_t *writer, i64 value);
-void writer_str(writer_t *writer, const char *str);
+i32 writer_write(writer_t *writer, const void *src, usize size);
+i32 writer_i64(writer_t *writer, i64 value);
+i32 writer_str(writer_t *writer, const char *str);
 
 // internal
 static inline char *writer__reserve(writer_t *writer, usize size);
@@ -105,7 +105,7 @@ writer__advance(writer_t *writer, usize size)
     writer->bpos += size;
 }
 
-void
+i32
 writer_write(writer_t *writer, const void *src, usize size)
 {
     char *dst = writer__reserve(writer, size);
@@ -119,20 +119,22 @@ writer_write(writer_t *writer, const void *src, usize size)
             isize current_write = write(writer->fd, src + written, size - written);
             if (current_write < 0) {
                 perror("write");
-                return;
+                return -1;
             }
             written += (usize)current_write;
         }
     }
+
+    return 0;
 }
 
-void
+i32
 writer_str(writer_t *writer, const char *str)
 {
-    writer_write(writer, str, strlen(str));
+    return writer_write(writer, str, strlen(str));
 }
 
-inline void
+inline i32
 writer_flush(writer_t *writer)
 {
     usize idx = 0;
@@ -140,11 +142,13 @@ writer_flush(writer_t *writer)
         isize written = write(writer->fd, writer->buffer + idx, writer->bpos - idx);
         if (written < 0) {
             perror("write");
-            return;
+            writer->bpos = 0;
+            return -1;
         }
         idx += (usize)written;
     }
     writer->bpos = 0;
+    return 0;
 }
 
 void
@@ -211,7 +215,7 @@ static const char digit_pairs[] = "00010203040506070809"
                                   "70717273747576777879"
                                   "80818283848586878889"
                                   "90919293949596979899";
-void
+i32
 writer_i64(writer_t *writer, i64 value)
 {
     char stack_buffer[32];
@@ -249,10 +253,11 @@ writer_i64(writer_t *writer, i64 value)
     }
 
     if (ibuffer == stack_buffer) {
-        writer_write(writer, idx, (usize)(ibuffer + len - idx));
-    } else {
-        writer__advance(writer, len);
+        return writer_write(writer, idx, (usize)(ibuffer + len - idx));
     }
+
+    writer__advance(writer, len);
+    return 0;
 }
 
 // NOLINTEND(readability-magic-numbers)
