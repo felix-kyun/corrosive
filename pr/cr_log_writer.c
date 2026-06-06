@@ -27,11 +27,12 @@ typedef struct writer_t {
 } writer_t;
 
 writer_t *writer_create(int target_fd, usize bsize);
-void      writer_write(writer_t *writer, const void *src, usize size);
-void      writer_write_i64(writer_t *writer, i64 value);
-void      writer_str(writer_t *writer, const char *str);
 void      writer_flush(writer_t *writer);
 void      writer_destroy(writer_t *writer);
+
+void writer_write(writer_t *writer, const void *src, usize size);
+void writer_i64(writer_t *writer, i64 value);
+void writer_str(writer_t *writer, const char *str);
 
 // internal
 static inline char *writer__reserve(writer_t *writer, usize size);
@@ -211,7 +212,7 @@ static const char digit_pairs[] = "00010203040506070809"
                                   "80818283848586878889"
                                   "90919293949596979899";
 void
-writer_write_i64(writer_t *writer, i64 value)
+writer_i64(writer_t *writer, i64 value)
 {
     char stack_buffer[32];
     u64  uvalue = fast_abs(value);
