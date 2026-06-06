@@ -26,11 +26,12 @@ typedef struct writer_t {
 
 } writer_t;
 
-extern writer_t *writer_create(int target_fd, usize bsize);
-extern void      writer_write(writer_t *writer, const void *src, usize size);
-extern void      writer_write_i64(writer_t *writer, i64 value);
-extern void      writer_flush(writer_t *writer);
-extern void      writer_destroy(writer_t *writer);
+writer_t *writer_create(int target_fd, usize bsize);
+void      writer_write(writer_t *writer, const void *src, usize size);
+void      writer_write_i64(writer_t *writer, i64 value);
+void      writer_str(writer_t *writer, const char *str);
+void      writer_flush(writer_t *writer);
+void      writer_destroy(writer_t *writer);
 
 // internal
 static inline char *writer__reserve(writer_t *writer, usize size);
@@ -122,6 +123,12 @@ writer_write(writer_t *writer, const void *src, usize size)
             written += (usize)current_write;
         }
     }
+}
+
+void
+writer_str(writer_t *writer, const char *str)
+{
+    writer_write(writer, str, strlen(str));
 }
 
 inline void
