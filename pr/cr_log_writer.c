@@ -31,9 +31,19 @@ i32       writer_flush(writer_t *writer);
 void      writer_destroy(writer_t *writer);
 
 i32 writer_write(writer_t *writer, const void *src, usize size);
-i32 writer_i64(writer_t *writer, i64 value);
-i32 writer_u64(writer_t *writer, u64 value);
 i32 writer_str(writer_t *writer, const char *str);
+
+// signed integers
+i32 writer_i64(writer_t *writer, i64 value);
+#define writer_i32(writer, value) writer_i64(writer, (i64)(value))
+#define writer_i16(writer, value) writer_i64(writer, (i64)(value))
+#define writer_i8(writer, value)  writer_i64(writer, (i64)(value))
+
+// unsigned integers
+i32 writer_u64(writer_t *writer, u64 value);
+#define writer_u32(writer, value) writer_u64(writer, (u64)(value))
+#define writer_u16(writer, value) writer_u64(writer, (u64)(value))
+#define writer_u8(writer, value)  writer_u64(writer, (u64)(value))
 
 // internal
 static inline char *writer__reserve(writer_t *writer, usize size);
@@ -190,10 +200,10 @@ static const u64 pow10_table[] = {
 };
 
 //! x => floor(log10(x))
-//!		 ^^^^^
 static inline u8
 fast_log10(u64 value)
 {
+    //! x  =>  floor(floor(log2(x)) * log10(2))
     u8 guess = ((63 - (u8)__builtin_clzll(value | 1ULL)) * 1233) >> 12;
     u8 next  = guess + (guess < 19);
     return guess + (value >= pow10_table[next]);
