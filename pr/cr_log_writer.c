@@ -233,6 +233,7 @@ writer_i64(writer_t *writer, i64 value)
 
     if (uvalue == 0) {
         *--idx = '0';
+        goto commit;
     }
 
     while (uvalue >= 10) {
@@ -253,6 +254,7 @@ writer_i64(writer_t *writer, i64 value)
         *--idx = '-';
     }
 
+commit:
     if (ibuffer == stack_buffer) {
         return writer_write(writer, idx, (usize)(ibuffer + len - idx));
     }
@@ -277,6 +279,7 @@ writer_u64(writer_t *writer, u64 value)
 
     if (value == 0) {
         *--idx = '0';
+        goto commit;
     }
 
     while (value >= 10) {
@@ -293,6 +296,7 @@ writer_u64(writer_t *writer, u64 value)
         *--idx = (char)('0' + value);
     }
 
+commit:
     if (ibuffer == stack_buffer) {
         return writer_write(writer, idx, (usize)(ibuffer + len - idx));
     }
