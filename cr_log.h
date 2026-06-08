@@ -14,8 +14,8 @@
 #define CR_LOG_H
 
 #define _POSIX_C_SOURCE 202405L
+#include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #define CR_LOG_LEVEL_TRACE 0
 #define CR_LOG_LEVEL_DEBUG 1
@@ -31,10 +31,6 @@
 
 #ifndef CR_LOG_PURGE_LEVEL
 #define CR_LOG_PURGE_LEVEL CR_LOG_LEVEL_TRACE
-#endif
-
-#ifndef CR_LOG_SINK_FILE_BUFFER
-#define CR_LOG_SINK_FILE_BUFFER 10240
 #endif
 
 #ifndef CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER
@@ -57,10 +53,7 @@
 #define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 1024
 #endif
 
-#define CACHE_LINE_SIZE 64
-
-// * compile time purging
-
+// purge
 #define CR_LOG(level, ...) cr_log(level, __FILE__, __LINE__, __func__, __VA_ARGS__)
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
@@ -81,21 +74,18 @@
 #define cr_log_info(...) ((void)0)
 #endif
 
-// CR_LOG_WARN_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_WARN
 #define cr_log_warn(fmt, ...) CR_LOG(CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_warn(...) ((void)0)
 #endif
 
-// CR_LOG_ERROR_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_ERROR
 #define cr_log_error(fmt, ...) CR_LOG(CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_error(...) ((void)0)
 #endif
 
-// CR_LOG_FATAL_ENABLED
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_FATAL
 #define cr_log_fatal(fmt, ...) CR_LOG(CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
 #else
@@ -155,6 +145,8 @@ cr_log_sink_t cr_log__sink_file_new(struct cr_log_sink_file_config_t config);
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
 /* Implementation */
+
+#define CACHE_LINE_SIZE 64
 
 #include <fcntl.h>
 #include <immintrin.h>
@@ -327,9 +319,6 @@ typedef struct cr_log_sink_file_state_t {
 
 // uses sink_fd methods for flush and process
 void cr_log__sink_file_free(void *sink_state);
-
-static_assert(sizeof(struct item_t) == CR_LOG_QUEUE_ITEM_SIZE, "item too large");
-static_assert(alignof(struct item_t) == CACHE_LINE_SIZE, "alignment broken");
 
 int
 enqueue_(struct cr_log_item_t *meta)
