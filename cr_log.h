@@ -111,17 +111,8 @@ extern thread_local int64_t scope_id;
 void                        cr_log_scope_set(const char *scope);
 
 // * sinks
-typedef struct cr_log_item_t cr_log_item_t;
-typedef struct cr_log_sink_t {
-    cr_log_level_t level;
-    void          *state;
-    void (*process)(void *sink_state, const cr_log_item_t *item);
-    void (*flush)(void *sink_state);
-    void (*free)(void *sink_state);
-} cr_log_sink_t;
-
-void cr_log_sink_add(cr_log_level_t level, cr_log_sink_t sink);
-
+typedef struct cr_log_sink_t cr_log_sink_t;
+void                         cr_log_sink_add(cr_log_level_t level, cr_log_sink_t sink);
 #define cr_log_sink_default() cr_log_sink_fd_new(.fd = STDERR_FILENO, .level = CR_LOG_LEVEL_TRACE, .bsize = 0)
 
 // ** FD sink
@@ -229,7 +220,7 @@ static constexpr size_t buffer_size
     );
 // clang-format on
 
-typedef struct cr_log_item_t {
+typedef struct item_t {
     u8              level;
     u32             line;
     const char     *filename;
@@ -238,12 +229,7 @@ typedef struct cr_log_item_t {
     struct timespec time;
     i64             scope_id;
     char            buffer[buffer_size];
-} cr_log_item_t;
-
-struct item_t {
-    alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
-    struct cr_log_item_t meta;
-};
+} item_t;
 
 struct queue_t {
     alignas(CACHE_LINE_SIZE) atomic_size_t write;
@@ -256,17 +242,20 @@ struct queue_t {
     pthread_t   consumer_thread;
     atomic_bool shutdown;
 
-    struct item_t buffer[queue_size];
+    struct {
+        alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
+        struct item_t meta;
+    } buffer[queue_size];
 } queue;
 
-static int   enqueue_(struct cr_log_item_t *meta);
-static int   enqueue(struct cr_log_item_t meta);
+static int   try_enqueue(struct item_t *meta);
+static int   enqueue(struct item_t meta);
 static int   try_dequeue(void);
 static void *dequeue(void *arg);
-static void  queue_consumer(struct cr_log_item_t *item);
+static void  queue_consumer(struct item_t *item);
 
 // intern table
-static struct intern_table_t {
+static struct itable_t {
     pthread_rwlock_t lock;
     struct {
         u64   hash;
@@ -297,8 +286,16 @@ static i32 writer_str(writer_t *writer, const char *str);
 static i32 writer_i64(writer_t *writer, i64 value);
 static i32 writer_u64(writer_t *writer, u64 value);
 
-static inline char *writer__reserve(writer_t *writer, usize size);
-static inline void  writer__advance(writer_t *writer, usize size);
+static inline char *writer_reserve(writer_t *writer, usize size);
+static inline void  writer_advance(writer_t *writer, usize size);
+
+typedef struct cr_log_sink_t {
+    cr_log_level_t level;
+    void          *state;
+    void (*process)(void *sink_state, const item_t *item);
+    void (*flush)(void *sink_state);
+    void (*free)(void *sink_state);
+} cr_log_sink_t;
 
 //! sink using fd should inherit sink_fd_base_t
 typedef struct sink_fd_base_t {
@@ -306,22 +303,22 @@ typedef struct sink_fd_base_t {
 } sink_fd_base_t;
 
 // FD Sink
-typedef sink_fd_base_t cr_log_sink_fd_state_t;
-void                   cr_log__sink_fd_flush(void *_state);
-void                   cr_log__sink_fd_process(void *_state, const cr_log_item_t *item);
-void                   cr_log__sink_fd_free(void *_state);
+typedef sink_fd_base_t sink_fd_state_t;
+void                   sink_fd_flush(void *_state);
+void                   sink_fd_process(void *_state, const item_t *item);
+void                   sink_fd_free(void *_state);
 
 // File Sink
-typedef struct cr_log_sink_file_state_t {
+typedef struct sink_file_state_t {
     sink_fd_base_t                   base;
     struct cr_log_sink_file_config_t config;
-} cr_log_sink_file_state_t;
+} sink_file_state_t;
 
 // uses sink_fd methods for flush and process
-void cr_log__sink_file_free(void *sink_state);
+void sink_file_free(void *sink_state);
 
 int
-enqueue_(struct cr_log_item_t *meta)
+try_enqueue(struct item_t *meta)
 {
     for (;;) {
         usize write_pos = atomic_load_relaxed(&queue.write);
@@ -349,12 +346,12 @@ enqueue_(struct cr_log_item_t *meta)
 }
 
 int
-enqueue(struct cr_log_item_t meta)
+enqueue(struct item_t meta)
 {
     i32 backoff = 1;
 
     for (int i = 0; i < CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS; i++) {
-        i32 ret = enqueue_(&meta);
+        i32 ret = try_enqueue(&meta);
         if (ret == 0) {
             return 0;
         }
@@ -505,7 +502,7 @@ cr_log(cr_log_level_t level, const char *file, i32 line, const char *func, const
     }
 
     // clang-format off
-    cr_log_item_t event = {
+    item_t event = {
         // .message   = logger_state.buffer,
         .level     = level,
         .time = { 0 },
@@ -619,7 +616,7 @@ writer_create(i32 target_fd, usize bsize)
 }
 
 static inline char *
-writer__reserve(writer_t *writer, usize size)
+writer_reserve(writer_t *writer, usize size)
 {
     // passthrough for unbuffered writes
     if (writer->bsize == 0) {
@@ -643,7 +640,7 @@ writer__reserve(writer_t *writer, usize size)
 
 [[__gnu__::__always_inline__]]
 static inline void
-writer__advance(writer_t *writer, usize size)
+writer_advance(writer_t *writer, usize size)
 {
     writer->bpos += size;
 }
@@ -651,10 +648,10 @@ writer__advance(writer_t *writer, usize size)
 i32
 writer_write(writer_t *writer, const void *src, usize size)
 {
-    char *dst = writer__reserve(writer, size);
+    char *dst = writer_reserve(writer, size);
     if (likely(dst)) {
         memcpy(dst, src, size);
-        writer__advance(writer, size);
+        writer_advance(writer, size);
     } else {
         // bypass buffer
         usize written = 0;
@@ -765,7 +762,7 @@ writer_i64(writer_t *writer, i64 value)
     u64  uvalue = fast_abs(value);
     // adjust to account for fast_log10 flooring and sign bit
     u8    len     = fast_log10(uvalue) + 1 + (value < 0);
-    char *ibuffer = writer__reserve(writer, len);
+    char *ibuffer = writer_reserve(writer, len);
 
     if (!ibuffer) {
         ibuffer = stack_buffer;
@@ -801,7 +798,7 @@ commit:
         return writer_write(writer, idx, (usize)(ibuffer + len - idx));
     }
 
-    writer__advance(writer, len);
+    writer_advance(writer, len);
     return 0;
 }
 
@@ -811,7 +808,7 @@ writer_u64(writer_t *writer, u64 value)
     char stack_buffer[32];
     // adjust to account for fast_log10 flooring
     u8    len     = fast_log10(value) + 1;
-    char *ibuffer = writer__reserve(writer, len);
+    char *ibuffer = writer_reserve(writer, len);
 
     if (!ibuffer) {
         ibuffer = stack_buffer;
@@ -843,7 +840,7 @@ commit:
         return writer_write(writer, idx, (usize)(ibuffer + len - idx));
     }
 
-    writer__advance(writer, len);
+    writer_advance(writer, len);
     return 0;
 }
 
@@ -862,7 +859,7 @@ cr_log_sink_add(cr_log_level_t level, cr_log_sink_t sink)
 cr_log_sink_t
 cr_log__sink_fd_new(struct cr_log_sink_fd_config_t config)
 {
-    cr_log_sink_fd_state_t *state = malloc(sizeof(cr_log_sink_fd_state_t));
+    sink_fd_state_t *state = malloc(sizeof(sink_fd_state_t));
     if (!state) {
         perror("(malloc) fd sink allocation failed");
         goto finish;
@@ -877,25 +874,26 @@ cr_log__sink_fd_new(struct cr_log_sink_fd_config_t config)
 finish:
     return (cr_log_sink_t) { //
                              .state   = state,
-                             .process = cr_log__sink_fd_process,
-                             .flush   = cr_log__sink_fd_flush,
-                             .free    = cr_log__sink_fd_free
+                             .process = sink_fd_process,
+                             .flush   = sink_fd_flush,
+                             .free    = sink_fd_free
     };
 }
 
 void
-cr_log__sink_fd_flush(void *_state)
+sink_fd_flush(void *_state)
 {
     auto state = (sink_fd_base_t *)_state;
     writer_flush(state->writer);
 }
 
 void
-cr_log__sink_fd_process(void *_state, const cr_log_item_t *item)
+sink_fd_process(void *_state, const item_t *item)
 {
     auto state  = (sink_fd_base_t *)_state;
     auto writer = state->writer;
 
+    // NOLINTBEGIN(readability-magic-numbers)
     writer_write(writer, "[", 1);
     writer_i64(writer, item->time.tv_sec);
     writer_write(writer, ".", 1);
@@ -915,13 +913,14 @@ cr_log__sink_fd_process(void *_state, const cr_log_item_t *item)
     writer_write(writer, "] ", 2);
     writer_str(writer, item->buffer);
     writer_write(writer, "\n", 1);
+    // NOLINTEND(readability-magic-numbers)
 }
 
 void
-cr_log__sink_fd_free(void *_state)
+sink_fd_free(void *_state)
 {
     auto state = (sink_fd_base_t *)_state;
-    cr_log__sink_fd_flush(state);
+    sink_fd_flush(state);
     writer_destroy(state->writer);
     free(state);
 }
@@ -929,7 +928,7 @@ cr_log__sink_fd_free(void *_state)
 cr_log_sink_t
 cr_log__sink_file_new(struct cr_log_sink_file_config_t config)
 {
-    cr_log_sink_file_state_t *state = malloc(sizeof(cr_log_sink_file_state_t));
+    sink_file_state_t *state = malloc(sizeof(sink_file_state_t));
     if (!state) {
         perror("(malloc) file sink state allocation failed");
         return (cr_log_sink_t) { 0 };
@@ -953,18 +952,18 @@ cr_log__sink_file_new(struct cr_log_sink_file_config_t config)
 
     return (cr_log_sink_t) {
         .state   = state,
-        .process = cr_log__sink_fd_process,
-        .flush   = cr_log__sink_fd_flush,
-        .free    = cr_log__sink_file_free,
+        .process = sink_fd_process,
+        .flush   = sink_fd_flush,
+        .free    = sink_file_free,
     };
 }
 
 void
-cr_log__sink_file_free(void *sink_state)
+sink_file_free(void *sink_state)
 {
-    struct cr_log_sink_file_state_t *state = sink_state;
-    int                              fd    = state->base.writer->fd;
-    cr_log__sink_fd_flush(state);
+    struct sink_file_state_t *state = sink_state;
+    int                       fd    = state->base.writer->fd;
+    sink_fd_flush(state);
     writer_destroy(state->base.writer);
     close(fd);
     free(state);
@@ -972,7 +971,7 @@ cr_log__sink_file_free(void *sink_state)
 
 // consumer
 static inline const char *
-cr_log__scope_get(int64_t sid)
+scope_get(int64_t sid)
 {
     if (sid == -1) {
         return "";
@@ -984,9 +983,9 @@ cr_log__scope_get(int64_t sid)
 }
 
 void
-queue_consumer(struct cr_log_item_t *item)
+queue_consumer(struct item_t *item)
 {
-    item->scope = cr_log__scope_get(item->scope_id);
+    item->scope = scope_get(item->scope_id);
     for (usize i = 0; i < logger_state.sink_count; i++) {
         cr_log_sink_t sink = logger_state.sinks[i];
 
