@@ -936,7 +936,7 @@ cr_log__sink_file_new(struct cr_log_sink_file_config_t config)
     }
 
     int fd   = STDERR_FILENO;
-    int mode = O_WRONLY | O_CREAT;
+    int mode = O_WRONLY | O_CREAT | O_APPEND;
     if (config.truncate) {
         mode |= O_TRUNC;
     }
