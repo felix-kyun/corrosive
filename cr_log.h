@@ -25,20 +25,18 @@
 #define CR_LOG_LEVEL_FATAL 5
 #define CR_LOG_LEVEL_OFF   6
 
-#ifndef CR_LOG_SINK_LIMIT
-#define CR_LOG_SINK_LIMIT 8
-#endif
-
 #ifndef CR_LOG_PURGE_LEVEL
 #define CR_LOG_PURGE_LEVEL CR_LOG_LEVEL_TRACE
 #endif
 
-#ifndef CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER
-#define CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER 8
+// safe upto 1 << 16 (limited by uint16_t)
+// intern tables are per instance
+#ifndef CR_LOG_ITABLE_SIZE
+#define CR_LOG_ITABLE_SIZE (1 << 8)
 #endif
 
-#ifndef CR_LOG_QUEUE_SIZE_POWER
-#define CR_LOG_QUEUE_SIZE_POWER 12
+#ifndef CR_LOG_QUEUE_SIZE
+#define CR_LOG_QUEUE_SIZE (1 << 12)
 #endif
 
 #ifndef CR_LOG_QUEUE_ITEM_SIZE
@@ -53,66 +51,91 @@
 #define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 1024
 #endif
 
+// more instances will increase memory overhead per thread
+// instance id is monotonic
+// as such, max_instance determines the max logger instance over app lifetime
+#ifndef CR_LOG_MAX_INSTANCES
+#define CR_LOG_MAX_INSTANCES 16
+#endif
+
 // purge
-#define CR_LOG(level, ...) cr_log(level, __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define CR_LOG_CTX(ctx, level, ...) cr_log_ctx(ctx, level, __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define CR_LOG(level, ...)          cr_log_ctx(global_ctx, level, __FILE__, __LINE__, __func__, __VA_ARGS__)
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
-#define cr_log_trace(fmt, ...) CR_LOG(CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define cr_log_trace_ctx(ctx, fmt, ...) CR_LOG_CTX(ctx, CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define cr_log_trace(fmt, ...)          CR_LOG(CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
 #else
-#define cr_log_trace(...) ((void)0)
+#define cr_log_trace_ctx(...) ((void)0)
+#define cr_log_trace(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_DEBUG
-#define cr_log_debug(fmt, ...) CR_LOG(CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define cr_log_debug_ctx(ctx, fmt, ...) CR_LOG_CTX(ctx, CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define cr_log_debug(fmt, ...)          CR_LOG(CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
 #else
-#define cr_log_debug(...) ((void)0)
+#define cr_log_debug_ctx(...) ((void)0)
+#define cr_log_debug(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_INFO
-#define cr_log_info(fmt, ...) CR_LOG(CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define cr_log_info_ctx(ctx, fmt, ...) CR_LOG_CTX(ctx, CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define cr_log_info(fmt, ...)          CR_LOG(CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
 #else
-#define cr_log_info(...) ((void)0)
+#define cr_log_info_ctx(...) ((void)0)
+#define cr_log_info(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_WARN
-#define cr_log_warn(fmt, ...) CR_LOG(CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
+#define cr_log_warn_ctx(ctx, fmt, ...) CR_LOG_CTX(ctx, CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
+#define cr_log_warn(fmt, ...)          CR_LOG(CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
 #else
-#define cr_log_warn(...) ((void)0)
+#define cr_log_warn_ctx(...) ((void)0)
+#define cr_log_warn(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_ERROR
-#define cr_log_error(fmt, ...) CR_LOG(CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define cr_log_error_ctx(ctx, fmt, ...) CR_LOG_CTX(ctx, CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define cr_log_error(fmt, ...)          CR_LOG(CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
 #else
-#define cr_log_error(...) ((void)0)
+#define cr_log_error_ctx(...) ((void)0)
+#define cr_log_error(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_FATAL
-#define cr_log_fatal(fmt, ...) CR_LOG(CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
+#define cr_log_fatal_ctx(ctx, fmt, ...) CR_LOG_CTX(ctx, CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
+#define cr_log_fatal(fmt, ...)          CR_LOG(CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
 #else
-#define cr_log_fatal(...) ((void)0)
+#define cr_log_fatal_ctx(...) ((void)0)
+#define cr_log_fatal(...)     ((void)0)
 #endif
 
-typedef uint8_t cr_log_level_t;
-
-void cr_log_init(void);
-void cr_log_flush(void);
-void cr_log_free(void);
-
-#ifdef CR_LOG_TELEMETRY
-uint64_t cr_log_get_dropped(void);
-#endif
-
-[[gnu::hot, gnu::format(__printf__, 5, 6)]]
-void cr_log(cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
-void cr_log_set_level(cr_log_level_t level);
-
-// * scope
-extern thread_local int64_t scope_id;
-void                        cr_log_scope_set(const char *scope);
-
-// * sinks
+typedef uint8_t              cr_log_level_t;
+typedef struct cr_log_ctx_t  cr_log_ctx_t;
 typedef struct cr_log_sink_t cr_log_sink_t;
-void                         cr_log_sink_add(cr_log_level_t level, cr_log_sink_t sink);
+
+cr_log_ctx_t *cr_log_new_ctx();
+void          cr_log_flush_ctx(cr_log_ctx_t *ctx);
+void          cr_log_destory_ctx(cr_log_ctx_t *ctx);
+void          cr_log_set_level_ctx(cr_log_ctx_t *ctx, cr_log_level_t level);
+void          cr_log_scope_set_ctx(cr_log_ctx_t *ctx, const char *scope);
+int           cr_log_sink_add_ctx(cr_log_ctx_t *ctx, cr_log_level_t level, cr_log_sink_t sink);
+
+[[gnu::hot, gnu::format(__printf__, 6, 7)]]
+void
+cr_log_ctx(cr_log_ctx_t *ctx, cr_log_level_t level, const char *file, int line, const char *func, const char *fmt, ...);
+
+// global logger
+cr_log_ctx_t *global_ctx;
+
+#define cr_log_init()                global_ctx = cr_log_new_ctx()
+#define cr_log_flush()               cr_log_flush_ctx(global_ctx)
+#define cr_log_destroy()             cr_log_destory_ctx(global_ctx)
+#define cr_log_set_level(level)      cr_log_set_level_ctx(global_ctx, level)
+#define cr_log_scope_set(scope)      cr_log_scope_set_ctx(global_ctx, scope)
+#define cr_log_sink_add(level, sink) cr_log_sink_add_ctx(global_ctx, level, sink)
+
+// default sink
 #define cr_log_sink_default() cr_log_sink_fd_new(.fd = STDERR_FILENO, .level = CR_LOG_LEVEL_TRACE, .bsize = 0)
 
 // ** FD sink
@@ -132,6 +155,11 @@ typedef struct cr_log_sink_file_config_t {
 
 cr_log_sink_t cr_log__sink_file_new(struct cr_log_sink_file_config_t config);
 #define cr_log_sink_file(...) cr_log__sink_file_new((struct cr_log_sink_file_config_t) { __VA_ARGS__ })
+
+#ifdef CR_LOG_TELEMETRY
+#define cr_log_get_dropped() cr_log_get_dropped_ctx(global_ctx)
+uint64_t cr_log_get_dropped_ctx(cr_log_ctx_t *ctx);
+#endif
 
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
@@ -204,9 +232,17 @@ static const char* cr_log_level_names[] = {
 alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
 #endif
 
+// monotonic instance id counter
+static atomic_uint_fast16_t instance_id_counter = 0;
+
+// per thread scope id storage
+// id is a index into the per-instance intern table
+thread_local struct {
+    uint16_t scope_id;
+} per_instance_scope[CR_LOG_MAX_INSTANCES];
+
 // clang-format off
-thread_local int64_t    scope_id   = 0;
-static constexpr size_t queue_size = 1 << CR_LOG_QUEUE_SIZE_POWER;
+static constexpr size_t queue_size = CR_LOG_QUEUE_SIZE;
 static constexpr size_t buffer_size
     = CR_LOG_QUEUE_ITEM_SIZE - (0
     + CACHE_LINE_SIZE			// sequence
@@ -231,41 +267,64 @@ typedef struct item_t {
     char            buffer[buffer_size];
 } item_t;
 
-struct queue_t {
+typedef struct queue_t {
     alignas(CACHE_LINE_SIZE) atomic_size_t write;
     char          pad1[CACHE_LINE_SIZE - sizeof(atomic_size_t)];
     atomic_size_t read;
     char          pad2[CACHE_LINE_SIZE - sizeof(atomic_size_t)];
 
-    usize       mask;
-    sem_t       items;
-    pthread_t   consumer_thread;
-    atomic_bool shutdown;
+    usize mask;
+    sem_t items;
 
     struct {
         alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
         struct item_t meta;
     } buffer[queue_size];
-} queue;
+} queue_t;
 
-static int   try_enqueue(struct item_t *meta);
-static int   enqueue(struct item_t meta);
-static int   try_dequeue(void);
-static void *dequeue(void *arg);
-static void  queue_consumer(struct item_t *item);
-
-// intern table
-static struct itable_t {
-    pthread_rwlock_t lock;
+typedef struct itable_t {
+    pthread_mutex_t write_lock;
     struct {
         u64   hash;
         char *key;
         bool  used;
-    } items[1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER];
-    uint64_t mask;
-} itable;
+    } items[CR_LOG_ITABLE_SIZE];
+    uint16_t mask;
+} itable_t;
 
-static inline u64 hash_string(const char *_key);
+typedef struct cr_log_ctx_t {
+    // monotonic instance id
+    // used internally for matching thread local contexts across multiple instance
+    uint16_t instance_id;
+
+    // runtime log level
+    cr_log_level_t level;
+
+    // are we running?
+    atomic_bool state;
+
+    // list of sinks
+    cr_log_sink_t *sinks_head;
+    cr_log_sink_t *sinks_tail;
+
+    // worker threads
+    pthread_t consumer;
+
+#ifdef CR_LOG_TELEMETRY
+    alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t dropped;
+#endif
+
+    // intern table
+    // contains scope names, thread names
+    alignas(CACHE_LINE_SIZE) itable_t itable;
+
+    // mpsc queue
+    queue_t queue;
+} cr_log_ctx_t;
+
+static int   enqueue(cr_log_ctx_t *ctx, struct item_t meta);
+static void *dequeue(void *arg);
+static void  queue_consumer(cr_log_ctx_t *ctx, struct item_t *item);
 
 // writer interface
 typedef struct writer_t {
@@ -290,8 +349,11 @@ static inline char *writer_reserve(writer_t *writer, usize size);
 static inline void  writer_advance(writer_t *writer, usize size);
 
 typedef struct cr_log_sink_t {
+    struct cr_log_sink_t *__next;
+
     cr_log_level_t level;
     void          *state;
+
     void (*process)(void *sink_state, const item_t *item);
     void (*flush)(void *sink_state);
     void (*free)(void *sink_state);
@@ -317,22 +379,129 @@ typedef struct sink_file_state_t {
 // uses sink_fd methods for flush and process
 void sink_file_free(void *sink_state);
 
+/*
+ * Definations
+ */
+
+cr_log_ctx_t *
+cr_log_new_ctx()
+{
+    cr_log_ctx_t *ctx = malloc(sizeof(cr_log_ctx_t));
+    if (ctx == NULL) {
+        return NULL;
+    }
+
+    ctx->instance_id = atomic_fetch_add_explicit(&instance_id_counter, 1, memory_order_relaxed);
+    ctx->level       = CR_LOG_LEVEL_INFO;
+    atomic_store_relaxed(&ctx->state, true);
+    ctx->sinks_head = nullptr;
+    ctx->sinks_tail = nullptr;
+
+#ifdef CR_LOG_TELEMETRY
+    atomic_init(&ctx->dropped, 0);
+#endif
+
+    // itable
+    pthread_mutex_init(&ctx->itable.write_lock, NULL);
+    ctx->itable.mask = (CR_LOG_ITABLE_SIZE)-1;
+    for (int i = 0; i < CR_LOG_ITABLE_SIZE; i++) {
+        ctx->itable.items[i].used = false;
+    }
+
+    // queue
+    for (usize i = 0; i < queue_size; i++) {
+        atomic_init(&ctx->queue.buffer[i].sequence, i);
+    }
+    ctx->queue.mask = queue_size - 1;
+    atomic_init(&ctx->queue.read, 0);
+    atomic_init(&ctx->queue.write, 0);
+    sem_init(&ctx->queue.items, 0, 0);
+    pthread_create(&ctx->consumer, NULL, dequeue, ctx);
+
+    return ctx;
+}
+
+void
+cr_log_set_level_ctx(cr_log_ctx_t *ctx, cr_log_level_t level)
+{
+    ctx->level = level;
+}
+
+void
+cr_log_flush_ctx(cr_log_ctx_t *ctx)
+{
+    cr_log_sink_t *sink = ctx->sinks_head;
+    while (sink != NULL) {
+        sink->flush(sink->state);
+        sink = sink->__next;
+    }
+}
+
 int
-try_enqueue(struct item_t *meta)
+cr_log_sink_add_ctx(cr_log_ctx_t *ctx, cr_log_level_t level, cr_log_sink_t sink)
+{
+    cr_log_sink_t *new_sink = malloc(sizeof(cr_log_sink_t));
+    if (new_sink == NULL) {
+        return -1;
+    }
+    *new_sink        = sink;
+    new_sink->level  = level;
+    new_sink->__next = NULL;
+
+    // append sink
+    if (ctx->sinks_tail == NULL) {
+        ctx->sinks_head = new_sink;
+    } else {
+        ctx->sinks_tail->__next = new_sink;
+    }
+    ctx->sinks_tail = new_sink;
+
+    return 0;
+}
+
+void
+cr_log_destory_ctx(cr_log_ctx_t *ctx)
+{
+    atomic_store_relaxed(&ctx->state, false);
+    sem_post(&ctx->queue.items);
+    pthread_join(ctx->consumer, NULL);
+    sem_destroy(&ctx->queue.items);
+
+    pthread_mutex_lock(&ctx->itable.write_lock);
+    for (i32 i = 0; i < (CR_LOG_ITABLE_SIZE); i++) {
+        if (ctx->itable.items[i].used) {
+            free(ctx->itable.items[i].key);
+            ctx->itable.items[i].used = false;
+        }
+    }
+    pthread_mutex_unlock(&ctx->itable.write_lock);
+    pthread_mutex_destroy(&ctx->itable.write_lock);
+
+    cr_log_sink_t *sink = ctx->sinks_head;
+    while (sink != NULL) {
+        sink->free(sink->state);
+        cr_log_sink_t *next = sink->__next;
+        free(sink);
+        sink = next;
+    }
+}
+
+int
+try_enqueue(cr_log_ctx_t *ctx, struct item_t *meta)
 {
     for (;;) {
-        usize write_pos = atomic_load_relaxed(&queue.write);
-        usize idx       = write_pos & queue.mask;
-        usize seq       = atomic_load_relaxed(&queue.buffer[idx].sequence);
+        usize write_pos = atomic_load_relaxed(&ctx->queue.write);
+        usize idx       = write_pos & ctx->queue.mask;
+        usize seq       = atomic_load_relaxed(&ctx->queue.buffer[idx].sequence);
 
         // check availablity
         if (write_pos - seq == 0) {
             // available, try cas
-            if (atomic_cas(&queue.write, &write_pos, write_pos + 1)) {
+            if (atomic_cas(&ctx->queue.write, &write_pos, write_pos + 1)) {
                 // claimed
-                queue.buffer[idx].meta = *meta;
-                atomic_store_release(&queue.buffer[idx].sequence, write_pos + 1);
-                sem_post(&queue.items);
+                ctx->queue.buffer[idx].meta = *meta;
+                atomic_store_release(&ctx->queue.buffer[idx].sequence, write_pos + 1);
+                sem_post(&ctx->queue.items);
                 return 0;
             }
             // cas failed, retry
@@ -346,12 +515,12 @@ try_enqueue(struct item_t *meta)
 }
 
 int
-enqueue(struct item_t meta)
+enqueue(cr_log_ctx_t *ctx, struct item_t meta)
 {
     i32 backoff = 1;
 
     for (int i = 0; i < CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS; i++) {
-        i32 ret = try_enqueue(&meta);
+        i32 ret = try_enqueue(ctx, &meta);
         if (ret == 0) {
             return 0;
         }
@@ -367,26 +536,26 @@ enqueue(struct item_t meta)
 
     // drop
 #ifdef CR_LOG_TELEMETRY
-    atomic_fetch_add(&drop_count, 1);
+    atomic_fetch_add(&ctx->dropped, 1);
 #endif
     return -1;
 }
 
 int
-try_dequeue(void)
+try_dequeue(cr_log_ctx_t *ctx)
 {
-    usize read_pos = atomic_load_relaxed(&queue.read);
-    usize idx      = read_pos & queue.mask;
-    usize seq      = atomic_load_acquire(&queue.buffer[idx].sequence);
+    usize read_pos = atomic_load_relaxed(&ctx->queue.read);
+    usize idx      = read_pos & ctx->queue.mask;
+    usize seq      = atomic_load_acquire(&ctx->queue.buffer[idx].sequence);
     isize diff     = (isize)(seq - (read_pos + 1));
 
     if (diff == 0) {
         // consume
-        queue_consumer(&queue.buffer[idx].meta);
+        queue_consumer(ctx, &ctx->queue.buffer[idx].meta);
 
         // release
-        atomic_store_relaxed(&queue.buffer[idx].sequence, read_pos + queue_size);
-        atomic_store_relaxed(&queue.read, read_pos + 1);
+        atomic_store_relaxed(&ctx->queue.buffer[idx].sequence, read_pos + queue_size);
+        atomic_store_relaxed(&ctx->queue.read, read_pos + 1);
 
         return 0;
     }
@@ -397,16 +566,18 @@ try_dequeue(void)
 void *
 dequeue([[maybe_unused]] void *arg)
 {
+    cr_log_ctx_t *ctx = (cr_log_ctx_t *)arg;
     for (;;) {
-        sem_wait(&queue.items);
-        while (try_dequeue() == 0) {
-            if (sem_trywait(&queue.items) != 0) {
+        sem_wait(&ctx->queue.items);
+        while (try_dequeue(ctx) == 0) {
+            if (sem_trywait(&ctx->queue.items) != 0) {
                 break;
             }
         }
 
-        if (atomic_load_relaxed(&queue.shutdown)) {
-            while (try_dequeue() == 0) { }
+        // drain on shutdown
+        if (!atomic_load_relaxed(&ctx->state)) {
+            while (try_dequeue(ctx) == 0) { }
             break;
         }
     }
@@ -414,102 +585,30 @@ dequeue([[maybe_unused]] void *arg)
     return NULL;
 }
 
-static struct {
-    cr_log_level_t level;
-    cr_log_sink_t  sinks[CR_LOG_SINK_LIMIT];
-    usize          sink_count;
-} logger_state = { 0 };
-
-void
-cr_log_init(void)
-{
-    logger_state.level = CR_LOG_LEVEL_INFO;
-    for (usize i = 0; i < queue_size; i++) {
-        atomic_init(&queue.buffer[i].sequence, i);
-    }
-    queue.mask = queue_size - 1;
-    atomic_init(&queue.read, 0);
-    atomic_init(&queue.write, 0);
-    atomic_init(&queue.shutdown, false);
-    sem_init(&queue.items, 0, 0);
-
-#ifdef CR_LOG_TELEMETRY
-    atomic_init(&drop_count, 0);
-#endif
-
-    // intern table
-    itable.mask = (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER) - 1;
-    pthread_rwlock_init(&itable.lock, NULL);
-
-    // spawn consumer thread
-    pthread_create(&queue.consumer_thread, NULL, dequeue, NULL);
-}
-
-void
-cr_log_set_level(cr_log_level_t level)
-{
-    logger_state.level = level;
-}
-
-void
-cr_log_flush(void)
-{
-    for (usize i = 0; i < logger_state.sink_count; i++) {
-        logger_state.sinks[i].flush(logger_state.sinks[i].state);
-    }
-}
-
-void
-cr_log_free(void)
-{
-    // signal and wait for consumer thread to finish
-    atomic_store_relaxed(&queue.shutdown, true);
-    sem_post(&queue.items);
-    pthread_join(queue.consumer_thread, NULL);
-    sem_destroy(&queue.items);
-
-    // free intern table
-    pthread_rwlock_wrlock(&itable.lock);
-    for (i32 i = 0; i < (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER); i++) {
-        if (itable.items[i].used) {
-            free(itable.items[i].key);
-            itable.items[i].used = false;
-        }
-    }
-    pthread_rwlock_unlock(&itable.lock);
-    pthread_rwlock_destroy(&itable.lock);
-
-    // free sinks
-    for (usize i = 0; i < logger_state.sink_count; i++) {
-        logger_state.sinks[i].free(logger_state.sinks[i].state);
-    }
-}
-
 #ifdef CR_LOG_TELEMETRY
 uint64_t
-cr_log_get_dropped()
+cr_log_get_dropped(cr_log_ctx_t *ctx)
 {
-    return atomic_load(&drop_count);
+    return atomic_load(&ctx->dropped);
 }
 #endif
 
 void
-cr_log(cr_log_level_t level, const char *file, i32 line, const char *func, const char *fmt, ...)
+cr_log_ctx(cr_log_ctx_t *ctx, cr_log_level_t level, const char *file, i32 line, const char *func, const char *fmt, ...)
 {
     // runtime purge
-    if (level < logger_state.level) {
+    if (level < ctx->level) {
         return;
     }
 
     // clang-format off
     item_t event = {
-        // .message   = logger_state.buffer,
         .level     = level,
         .time = { 0 },
         .filename  = file,
         .line      = (u32)line,
         .function  = func,
-        .scope_id = scope_id
+        .scope_id = per_instance_scope[ctx->instance_id].scope_id
     };
     // clang-format on
 
@@ -520,7 +619,7 @@ cr_log(cr_log_level_t level, const char *file, i32 line, const char *func, const
     (void)vsnprintf(event.buffer, buffer_size, fmt, args);
     va_end(args);
 
-    enqueue(event);
+    enqueue(ctx, event);
 }
 
 // * Scope
@@ -541,47 +640,62 @@ hash_string(const char *_key)
 }
 
 void
-cr_log_scope_set(const char *scope)
+cr_log_scope_set_ctx(cr_log_ctx_t *ctx, const char *scope)
 {
-    auto hash       = hash_string(scope);
-    u64  idx        = hash & itable.mask;
-    bool write_mode = false;
-    pthread_rwlock_rdlock(&itable.lock);
-    for (i32 i = 0; i < (1 << CR_LOG_SCOPE_INTERN_TABLE_SIZE_POWER); i++) {
-        auto entry = &itable.items[idx];
-        if (!entry->used) {
-            if (!write_mode) {
-                pthread_rwlock_unlock(&itable.lock);
-                // upgrade to write lock and recheck
-                pthread_rwlock_wrlock(&itable.lock);
-                write_mode = true;
-                idx        = hash & itable.mask;
-                i          = -1;
-                continue;
-            }
+    auto     hash = hash_string(scope);
+    uint16_t idx  = hash & ctx->itable.mask;
 
+    pthread_mutex_lock(&ctx->itable.write_lock);
+    for (i32 i = 0; i < (CR_LOG_ITABLE_SIZE); i++) {
+        auto entry = &ctx->itable.items[idx];
+
+        // 0 is reserved for "default" scope
+        if (idx != 0 && !entry->used) {
             entry->key = strdup(scope);
             if (!entry->key) {
-                scope_id = -1;
+                per_instance_scope[ctx->instance_id].scope_id = 0;
                 goto cleanup;
             }
 
-            entry->hash = hash;
-            entry->used = true;
-            scope_id    = (int64_t)idx;
+            entry->used                                   = true;
+            entry->hash                                   = hash;
+            per_instance_scope[ctx->instance_id].scope_id = idx;
             goto cleanup;
         } else if (entry->hash == hash && strcmp(entry->key, scope) == 0) {
-            scope_id = (int64_t)idx;
+            per_instance_scope[ctx->instance_id].scope_id = idx;
             goto cleanup;
         } else {
-            idx = (idx + 1) & itable.mask;
+            idx = (idx + 1) & ctx->itable.mask;
         }
     }
-    // ignore scope at this level as we ran out of space
-    scope_id = -1;
+    per_instance_scope[ctx->instance_id].scope_id = 0;
 
 cleanup:
-    pthread_rwlock_unlock(&itable.lock);
+    pthread_mutex_unlock(&ctx->itable.write_lock);
+}
+
+static inline const char *
+scope_get(cr_log_ctx_t *ctx, int64_t sid)
+{
+    if (sid == -1) {
+        return "";
+    }
+
+    return ctx->itable.items[sid].key;
+}
+
+void
+queue_consumer(cr_log_ctx_t *ctx, struct item_t *item)
+{
+    item->scope = scope_get(ctx, item->scope_id);
+
+    cr_log_sink_t *sink = ctx->sinks_head;
+    while (sink != NULL) {
+        if (sink->level <= item->level) {
+            sink->process(sink->state, item);
+        }
+        sink = sink->__next;
+    }
 }
 
 // * Writer
@@ -847,15 +961,6 @@ commit:
 // NOLINTEND(readability-magic-numbers)
 
 // * Sinks
-void
-cr_log_sink_add(cr_log_level_t level, cr_log_sink_t sink)
-{
-    if (logger_state.sink_count < CR_LOG_SINK_LIMIT) {
-        sink.level                                    = level;
-        logger_state.sinks[logger_state.sink_count++] = sink;
-    }
-}
-
 cr_log_sink_t
 cr_log__sink_fd_new(struct cr_log_sink_fd_config_t config)
 {
@@ -969,31 +1074,6 @@ sink_file_free(void *sink_state)
     free(state);
 }
 
-// consumer
-static inline const char *
-scope_get(int64_t sid)
-{
-    if (sid == -1) {
-        return "";
-    }
-    pthread_rwlock_rdlock(&itable.lock);
-    const char *result = itable.items[sid].key;
-    pthread_rwlock_unlock(&itable.lock);
-    return result;
-}
-
-void
-queue_consumer(struct item_t *item)
-{
-    item->scope = scope_get(item->scope_id);
-    for (usize i = 0; i < logger_state.sink_count; i++) {
-        cr_log_sink_t sink = logger_state.sinks[i];
-
-        if (sink.level <= item->level) {
-            sink.process(sink.state, item);
-        }
-    }
-}
 // }}}
 // }}}
 
