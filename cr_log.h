@@ -130,25 +130,23 @@ typedef struct cr_log_sink_t {
     void (*free)(void *sink_state);
 } cr_log_sink_t;
 
-void cr_log_sink_add(cr_log_sink_t sink);
+void cr_log_sink_add(cr_log_level_t level, cr_log_sink_t sink);
 
 #define cr_log_sink_default() cr_log_sink_fd_new(.fd = STDERR_FILENO, .level = CR_LOG_LEVEL_TRACE, .bsize = 0)
 
 // ** FD sink
 struct cr_log_sink_fd_config_t {
-    int            fd;
-    cr_log_level_t level;
-    size_t         bsize;
+    int    fd;
+    size_t bsize;
 };
 cr_log_sink_t cr_log__sink_fd_new(struct cr_log_sink_fd_config_t config);
 #define cr_log_sink_fd(...) cr_log__sink_fd_new((struct cr_log_sink_fd_config_t) { __VA_ARGS__ })
 
 // ** file sink
 typedef struct cr_log_sink_file_config_t {
-    const char    *target;
-    cr_log_level_t level;
-    bool           truncate;
-    size_t         bsize;
+    const char *target;
+    bool        truncate;
+    size_t      bsize;
 } cr_log_sink_file_config_t;
 
 cr_log_sink_t cr_log__sink_file_new(struct cr_log_sink_file_config_t config);
@@ -864,9 +862,10 @@ commit:
 
 // * Sinks
 void
-cr_log_sink_add(cr_log_sink_t sink)
+cr_log_sink_add(cr_log_level_t level, cr_log_sink_t sink)
 {
     if (logger_state.sink_count < CR_LOG_SINK_LIMIT) {
+        sink.level                                    = level;
         logger_state.sinks[logger_state.sink_count++] = sink;
     }
 }
@@ -888,7 +887,6 @@ cr_log__sink_fd_new(struct cr_log_sink_fd_config_t config)
 
 finish:
     return (cr_log_sink_t) { //
-                             .level   = config.level,
                              .state   = state,
                              .process = cr_log__sink_fd_process,
                              .flush   = cr_log__sink_fd_flush,
@@ -965,7 +963,6 @@ cr_log__sink_file_new(struct cr_log_sink_file_config_t config)
     };
 
     return (cr_log_sink_t) {
-        .level   = config.level,
         .state   = state,
         .process = cr_log__sink_fd_process,
         .flush   = cr_log__sink_fd_flush,
