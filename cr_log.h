@@ -602,7 +602,7 @@ dequeue([[maybe_unused]] void *arg)
 
 #ifdef CR_LOG_TELEMETRY
 uint64_t
-cr_log_get_dropped(cr_log_ctx_t *ctx)
+cr_log_get_dropped_ctx(cr_log_ctx_t *ctx)
 {
     return atomic_load(&ctx->dropped);
 }
