@@ -165,7 +165,17 @@ uint64_t cr_log_get_dropped_ctx(cr_log_ctx_t *ctx);
 
 /* Implementation */
 
-#define CACHE_LINE_SIZE 64
+#if (CR_LOG_ITABLE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
+#error "CR_LOG_ITABLE_SIZE must be a power of 2"
+#endif
+
+#if CR_LOG_ITABLE_SIZE >= (1 << 16)
+#error "CR_LOG_ITABLE_SIZE must be less than 2^16 (limited by uint16_t)"
+#endif
+
+#if (CR_LOG_QUEUE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
+#error "CR_LOG_QUEUE_SIZE must be a power of 2"
+#endif
 
 #include <fcntl.h>
 #include <immintrin.h>
@@ -192,6 +202,8 @@ typedef int64_t   i64;
 typedef uint64_t  u64;
 typedef size_t    usize;
 typedef ptrdiff_t isize;
+
+#define CACHE_LINE_SIZE 64
 
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -269,9 +281,7 @@ typedef struct item_t {
 
 typedef struct queue_t {
     alignas(CACHE_LINE_SIZE) atomic_size_t write;
-    char          pad1[CACHE_LINE_SIZE - sizeof(atomic_size_t)];
-    atomic_size_t read;
-    char          pad2[CACHE_LINE_SIZE - sizeof(atomic_size_t)];
+    alignas(CACHE_LINE_SIZE) atomic_size_t read;
 
     usize mask;
     sem_t items;
@@ -281,6 +291,9 @@ typedef struct queue_t {
         struct item_t meta;
     } buffer[queue_size];
 } queue_t;
+
+static_assert(
+    offsetof(queue_t, read) == CACHE_LINE_SIZE, "queue_t-> read/write are not aligned and might share a cache line");
 
 typedef struct itable_t {
     pthread_mutex_t write_lock;
@@ -319,7 +332,7 @@ typedef struct cr_log_ctx_t {
     alignas(CACHE_LINE_SIZE) itable_t itable;
 
     // mpsc queue
-    queue_t queue;
+    alignas(CACHE_LINE_SIZE) queue_t queue;
 } cr_log_ctx_t;
 
 static int   enqueue(cr_log_ctx_t *ctx, struct item_t meta);
