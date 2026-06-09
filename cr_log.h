@@ -497,6 +497,8 @@ cr_log_destory_ctx(cr_log_ctx_t *ctx)
         free(sink);
         sink = next;
     }
+
+    free(ctx);
 }
 
 int
