@@ -10,8 +10,30 @@
     For other informations, see the end of this file.
  */
 
+/*
+ * Table Of Contents
+ * zones
+ * 	  public
+ *		configs
+ *		macros
+ *		types
+ *		declarations
+ * 	  private
+ *		configs
+ *		macros
+ *		types
+ *		declarations
+ *		statics
+ *		helpers
+ *		definitions
+ */
+
 #ifndef CR_LOG_H
 #define CR_LOG_H
+
+/***********************
+ * zone:public:configs *
+ ***********************/
 
 #define _POSIX_C_SOURCE 202405L
 #include <stddef.h>
@@ -58,7 +80,10 @@
 #define CR_LOG_MAX_INSTANCES 16
 #endif
 
-// purge
+/**********************
+ * zone:public:macros *
+ **********************/
+
 #define CR_LOG(ctx, level, ...)   cr_log(ctx, level, __FILE__, __LINE__, __func__, __VA_ARGS__)
 #define CR_LOG_GLOBAL(level, ...) cr_log(global_ctx, level, __FILE__, __LINE__, __func__, __VA_ARGS__)
 
@@ -110,10 +135,18 @@
 #define cr_log_fatal(...)     ((void)0)
 #endif
 
+/*********************
+ * zone:public:types *
+ *********************/
+
 typedef uint8_t                 cr_log_level;
 typedef struct cr_log_ctx       cr_log_ctx;
 typedef struct cr_log_sink      cr_log_sink;
 typedef struct cr_log_transport cr_log_transport;
+
+/****************************
+ * zone:public:declarations *
+ ****************************/
 
 cr_log_ctx *cr_log_new_ctx();
 void        cr_log_flush_ctx(cr_log_ctx *ctx);
@@ -150,7 +183,15 @@ uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
 
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
 
-/* Implementation */
+/*
+ * ======================================================
+ * ================== Implementation ====================
+ * ======================================================
+ */
+
+/************************
+ * zone:private:configs *
+ ************************/
 
 #if (CR_LOG_ITABLE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
 #error "CR_LOG_ITABLE_SIZE must be a power of 2"
@@ -192,6 +233,10 @@ typedef ptrdiff_t isize;
 
 #define CACHE_LINE_SIZE 64
 
+/***********************
+ * zone:private:macros *
+ ***********************/
+
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define err(fmt, ...)                                                                                                  \
@@ -207,53 +252,21 @@ typedef ptrdiff_t isize;
 #define atomic_cas(target, expected, desired)                                                                          \
     atomic_compare_exchange_weak_explicit(target, expected, desired, memory_order_relaxed, memory_order_relaxed)
 
-// clang-format off
-static const char* cr_log_reset    = "\x1b[0m";
-static const char* cr_log_colors[] = {
-    [CR_LOG_LEVEL_TRACE] = "\x1b[34m", // blue
-    [CR_LOG_LEVEL_DEBUG] = "\x1b[36m", // cyan
-    [CR_LOG_LEVEL_INFO]  = "\x1b[32m", // green
-    [CR_LOG_LEVEL_WARN]  = "\x1b[33m", // yellow
-    [CR_LOG_LEVEL_ERROR] = "\x1b[31m", // red
-    [CR_LOG_LEVEL_FATAL] = "\x1b[35m", // magenta
-};
-static const char* cr_log_level_names[] = {
-    [CR_LOG_LEVEL_TRACE] = "TRACE",
-    [CR_LOG_LEVEL_DEBUG] = "DEBUG",
-    [CR_LOG_LEVEL_INFO]  = "INFO ",
-    [CR_LOG_LEVEL_WARN]  = "WARN ",
-    [CR_LOG_LEVEL_ERROR] = "ERROR",
-    [CR_LOG_LEVEL_FATAL] = "FATAL",
-};
-// clang-format on
+/**********************
+ * zone:private:types *
+ **********************/
 
-#ifdef CR_LOG_TELEMETRY
-alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
-#endif
-
-// monotonic instance id counter
-static atomic_uint_fast16_t instance_id_counter = 0;
-
-// per thread scope id storage
-// id is a index into the per-instance intern table
-thread_local struct {
-    uint16_t scope_id;
-} per_instance_scope[CR_LOG_MAX_INSTANCES];
-
-// clang-format off
-static constexpr size_t queue_size = CR_LOG_QUEUE_SIZE;
-static constexpr size_t buffer_size
-    = CR_LOG_QUEUE_ITEM_SIZE - (0
-    + CACHE_LINE_SIZE			// sequence
-    + sizeof(u8) 			// level
-    + sizeof(u32) 			// line
-    + sizeof(const char *)		// filename
-    + sizeof(const char *)		// function
-    + sizeof(const char *)		// scope
-    + sizeof(struct timespec)	// time
-    + sizeof(i64)			// scope_id
+static constexpr size_t queue_size  = CR_LOG_QUEUE_SIZE;
+static constexpr size_t buffer_size = CR_LOG_QUEUE_ITEM_SIZE
+    - (CACHE_LINE_SIZE           // sequence
+       + sizeof(u8)              // level
+       + sizeof(u32)             // line
+       + sizeof(const char *)    // filename
+       + sizeof(const char *)    // function
+       + sizeof(const char *)    // scope
+       + sizeof(struct timespec) // time
+       + sizeof(i64)             // scope_id
     );
-// clang-format on
 
 typedef struct cr_log_item {
     u8              level;
@@ -323,10 +336,6 @@ typedef struct cr_log_ctx {
     alignas(CACHE_LINE_SIZE) cr_log_queue queue;
 } cr_log_ctx;
 
-static int   enqueue(cr_log_ctx *ctx, struct cr_log_item meta);
-static void *dequeue(void *arg);
-static void  queue_consumer(cr_log_ctx *ctx, struct cr_log_item *item);
-
 typedef void (*process_fn)(cr_log_sink *sink, cr_log_item *item);
 struct cr_log_sink {
     struct cr_log_sink *next;
@@ -356,6 +365,10 @@ struct cr_log_transport_fd {
     int                     fd;
 };
 
+/*****************************
+ * zone:private:declarations *
+ *****************************/
+
 static cr_log_sink *cr_log__sink_new(process_fn process, usize bsize, struct cr_log_transport **transports);
 static void         cr_log__sink_free(cr_log_sink *sink);
 static i32          cr_log__sink_flush(cr_log_sink *sink);
@@ -375,19 +388,61 @@ static int cr_log__transport_fd_close(cr_log_transport *transport);
 
 static int cr_log__transport_file_close(cr_log_transport *transport);
 
-// def:transport_fd
+static int   enqueue(cr_log_ctx *ctx, struct cr_log_item meta);
+static void *dequeue(void *arg);
+static void  queue_consumer(cr_log_ctx *ctx, struct cr_log_item *item);
+
+/************************
+ * zone:private:statics *
+ ************************/
+
+// clang-format off
+static const char* cr_log_reset    = "\x1b[0m";
+static const char* cr_log_colors[] = {
+    [CR_LOG_LEVEL_TRACE] = "\x1b[34m", // blue
+    [CR_LOG_LEVEL_DEBUG] = "\x1b[36m", // cyan
+    [CR_LOG_LEVEL_INFO]  = "\x1b[32m", // green
+    [CR_LOG_LEVEL_WARN]  = "\x1b[33m", // yellow
+    [CR_LOG_LEVEL_ERROR] = "\x1b[31m", // red
+    [CR_LOG_LEVEL_FATAL] = "\x1b[35m", // magenta
+};
+static const char* cr_log_level_names[] = {
+    [CR_LOG_LEVEL_TRACE] = "TRACE",
+    [CR_LOG_LEVEL_DEBUG] = "DEBUG",
+    [CR_LOG_LEVEL_INFO]  = "INFO ",
+    [CR_LOG_LEVEL_WARN]  = "WARN ",
+    [CR_LOG_LEVEL_ERROR] = "ERROR",
+    [CR_LOG_LEVEL_FATAL] = "FATAL",
+};
+// clang-format on
+
+#ifdef CR_LOG_TELEMETRY
+alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
+#endif
+
+// monotonic instance id counter
+static atomic_uint_fast16_t instance_id_counter = 0;
+
+// per thread scope id storage
+// id is a index into the per-instance intern table
+thread_local struct {
+    uint16_t scope_id;
+} per_instance_scope[CR_LOG_MAX_INSTANCES];
+
 static struct cr_log_transport_ops fd_ops = {
     .write = cr_log__transport_fd_write,
     .close = cr_log__transport_fd_close,
 };
 
-// def:transport_file
 static struct cr_log_transport_ops file_ops = {
     .write = cr_log__transport_fd_write,
     .close = cr_log__transport_file_close,
 };
 
-// helpers
+/************************
+ * zone:private:helpers *
+ ************************/
+
 static const u64 pow10_table[] = {
     1ULL,                   // 10^0
     10ULL,                  // 10^1
@@ -428,9 +483,9 @@ fast_abs(i64 value)
     return ((u64)value + mask) ^ mask;
 }
 
-/*
- * Definations
- */
+/****************************
+ * zone:private:definitions *
+ ****************************/
 
 cr_log_ctx *
 cr_log_new_ctx()
