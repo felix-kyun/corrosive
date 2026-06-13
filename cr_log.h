@@ -159,7 +159,7 @@ int         cr_log_sink_add_ctx(cr_log_ctx *ctx, cr_log_level level, cr_log_sink
 void cr_log(cr_log_ctx *ctx, cr_log_level level, const char *file, int line, const char *func, const char *fmt, ...);
 
 // global logger
-cr_log_ctx *global_ctx;
+extern cr_log_ctx *global_ctx;
 
 #define cr_log_init()                global_ctx = cr_log_new_ctx()
 #define cr_log_flush()               cr_log_flush_ctx(global_ctx)
@@ -395,6 +395,8 @@ static void  queue_consumer(cr_log_ctx *ctx, struct cr_log_item *item);
 /************************
  * zone:private:statics *
  ************************/
+
+cr_log_ctx *global_ctx;
 
 // clang-format off
 static const char* cr_log_reset    = "\x1b[0m";
