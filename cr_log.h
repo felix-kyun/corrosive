@@ -73,9 +73,6 @@
 #define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 1024
 #endif
 
-// more instances will increase memory overhead per thread
-// instance id is monotonic
-// as such, max_instance determines the max logger instance over app lifetime
 #ifndef CR_LOG_MAX_INSTANCES
 #define CR_LOG_MAX_INSTANCES 16
 #endif
@@ -445,6 +442,7 @@ static struct cr_log_transport_ops file_ops = {
  * zone:private:helpers *
  ************************/
 
+// NOLINTBEGIN(readability-magic-numbers)
 static const u64 pow10_table[] = {
     1ULL,                   // 10^0
     10ULL,                  // 10^1
@@ -484,6 +482,7 @@ fast_abs(i64 value)
     u64 mask = (u64)value >> 63;
     return ((u64)value + mask) ^ mask;
 }
+// NOLINTEND(readability-magic-numbers)
 
 /****************************
  * zone:private:definitions *
@@ -1122,7 +1121,31 @@ Table Of Contents
     Credits
 
 Compile time options
-        To be added.
+        CR_LOG_PURGE_LEVEL
+                Set this to appropriate CR_LOG_LEVEL_* to purge log function calls.
+                Any log of a lower level is replaced by a (void(0)).
+                Therefore, no runtime overhead.
+        CR_LOG_ITABLE_SIZE
+                Used to set the size of intern table inside all the contexts.
+                Only nessecary if you set scopes frequently (default size is 256).
+        CR_LOG_QUEUE_SIZE
+                Size of the internal queue used to asyncronously dispatch log calls.
+                Only tune this if you are working under extreme multithreadedthread load.
+                The default value is usually more than enough.
+                Profile using CR_LOG_TELEMETRY to see dropped items.
+        CR_LOG_QUEUE_ITEM_SIZE
+                Controls the size of individual items in queue.
+        CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
+                Max attempts to enqueue an item before dropping it.
+        CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
+                Used to clamp backoff spin timing.
+        CR_LOG_MAX_INSTANCES
+                This controls the upper limit on how many context can be created during app lifetime.
+                This is necessary as this sets the size of how many scope_id to value any thread can handle.
+                A value of 16 means, there can be total 16 context (including global one).
+                Internally each context gets a monotonic context id,
+                Which is used to look up what scope is set for any context per thread.
+                Higher value will increase memory overhead per thread.
 
 Documentation
         To be added.
