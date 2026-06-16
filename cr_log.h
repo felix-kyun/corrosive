@@ -51,32 +51,6 @@
 #define CR_LOG_PURGE_LEVEL CR_LOG_LEVEL_TRACE
 #endif
 
-// safe upto 1 << 16 (limited by uint16_t)
-// intern tables are per instance
-#ifndef CR_LOG_ITABLE_SIZE
-#define CR_LOG_ITABLE_SIZE (1 << 8)
-#endif
-
-#ifndef CR_LOG_QUEUE_SIZE
-#define CR_LOG_QUEUE_SIZE (1 << 12)
-#endif
-
-#ifndef CR_LOG_QUEUE_ITEM_SIZE
-#define CR_LOG_QUEUE_ITEM_SIZE 512
-#endif
-
-#ifndef CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
-#define CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS 128
-#endif
-
-#ifndef CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
-#define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 1024
-#endif
-
-#ifndef CR_LOG_MAX_INSTANCES
-#define CR_LOG_MAX_INSTANCES 16
-#endif
-
 /**********************
  * zone:public:macros *
  **********************/
@@ -190,18 +164,6 @@ uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
  * zone:private:configs *
  ************************/
 
-#if (CR_LOG_ITABLE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
-#error "CR_LOG_ITABLE_SIZE must be a power of 2"
-#endif
-
-#if CR_LOG_ITABLE_SIZE >= (1 << 16)
-#error "CR_LOG_ITABLE_SIZE must be less than 2^16 (limited by uint16_t)"
-#endif
-
-#if (CR_LOG_QUEUE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
-#error "CR_LOG_QUEUE_SIZE must be a power of 2"
-#endif
-
 #include <fcntl.h>
 #include <immintrin.h>
 #include <inttypes.h>
@@ -227,6 +189,44 @@ typedef int64_t   i64;
 typedef uint64_t  u64;
 typedef size_t    usize;
 typedef ptrdiff_t isize;
+
+// safe upto 1 << 16 (limited by uint16_t)
+// intern tables are per instance
+#ifndef CR_LOG_ITABLE_SIZE
+#define CR_LOG_ITABLE_SIZE (1 << 8)
+#endif
+
+#ifndef CR_LOG_QUEUE_SIZE
+#define CR_LOG_QUEUE_SIZE (1 << 12)
+#endif
+
+#ifndef CR_LOG_QUEUE_ITEM_SIZE
+#define CR_LOG_QUEUE_ITEM_SIZE 512
+#endif
+
+#ifndef CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
+#define CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS 128
+#endif
+
+#ifndef CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
+#define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 1024
+#endif
+
+#ifndef CR_LOG_MAX_INSTANCES
+#define CR_LOG_MAX_INSTANCES 16
+#endif
+
+#if (CR_LOG_ITABLE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
+#error "CR_LOG_ITABLE_SIZE must be a power of 2"
+#endif
+
+#if CR_LOG_ITABLE_SIZE >= (1 << 16)
+#error "CR_LOG_ITABLE_SIZE must be less than 2^16 (limited by uint16_t)"
+#endif
+
+#if (CR_LOG_QUEUE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
+#error "CR_LOG_QUEUE_SIZE must be a power of 2"
+#endif
 
 #define CACHE_LINE_SIZE 64
 
