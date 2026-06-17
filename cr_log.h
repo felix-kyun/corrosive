@@ -200,8 +200,8 @@ typedef ptrdiff_t isize;
 #define CR_LOG_QUEUE_SIZE (1 << 12)
 #endif
 
-#ifndef CR_LOG_QUEUE_ITEM_SIZE
-#define CR_LOG_QUEUE_ITEM_SIZE 512
+#ifndef CR_LOG_ITEM_SIZE
+#define CR_LOG_ITEM_SIZE (1 << 9)
 #endif
 
 #ifndef CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
@@ -254,7 +254,7 @@ typedef ptrdiff_t isize;
  **********************/
 
 static constexpr size_t queue_size  = CR_LOG_QUEUE_SIZE;
-static constexpr size_t buffer_size = CR_LOG_QUEUE_ITEM_SIZE
+static constexpr size_t buffer_size = CR_LOG_ITEM_SIZE
     - (CACHE_LINE_SIZE           // sequence
        + sizeof(u8)              // level
        + sizeof(u32)             // line
@@ -1133,7 +1133,7 @@ Compile time options
                 Only tune this if you are working under extreme multithreadedthread load.
                 The default value is usually more than enough.
                 Profile using CR_LOG_TELEMETRY to see dropped items.
-        CR_LOG_QUEUE_ITEM_SIZE
+        CR_LOG_ITEM_SIZE
                 Controls the size of individual items in queue.
         CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
                 Max attempts to enqueue an item before dropping it.
