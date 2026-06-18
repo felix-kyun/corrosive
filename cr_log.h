@@ -190,18 +190,24 @@ typedef uint64_t  u64;
 typedef size_t    usize;
 typedef ptrdiff_t isize;
 
-// safe upto 1 << 16 (limited by uint16_t)
-// intern tables are per instance
-#ifndef CR_LOG_ITABLE_SIZE
-#define CR_LOG_ITABLE_SIZE (1 << 8)
+#ifndef CR_LOG_MAX_INSTANCES
+#define CR_LOG_MAX_INSTANCES 16
+#endif
+
+#ifndef CR_LOG_ITEM_SIZE
+#define CR_LOG_ITEM_SIZE (1 << 9)
+#endif
+
+#ifndef CR_LOG_ITEM_FIELDS
+#define CR_LOG_ITEM_FIELDS 16
 #endif
 
 #ifndef CR_LOG_QUEUE_SIZE
 #define CR_LOG_QUEUE_SIZE (1 << 12)
 #endif
 
-#ifndef CR_LOG_ITEM_SIZE
-#define CR_LOG_ITEM_SIZE (1 << 9)
+#ifndef CR_LOG_ITABLE_SIZE
+#define CR_LOG_ITABLE_SIZE (1 << 8)
 #endif
 
 #ifndef CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
@@ -212,20 +218,20 @@ typedef ptrdiff_t isize;
 #define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 1024
 #endif
 
-#ifndef CR_LOG_MAX_INSTANCES
-#define CR_LOG_MAX_INSTANCES 16
+#if (CR_LOG_ITEM_SIZE & (CR_LOG_ITEM_SIZE - 1)) != 0
+#error "CR_LOG_ITEM_SIZE is not a power of 2"
 #endif
 
-#if (CR_LOG_ITABLE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
-#error "CR_LOG_ITABLE_SIZE must be a power of 2"
+#if (CR_LOG_QUEUE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
+#error "CR_LOG_QUEUE_SIZE must be a power of 2"
 #endif
 
 #if CR_LOG_ITABLE_SIZE >= (1 << 16)
 #error "CR_LOG_ITABLE_SIZE must be less than 2^16 (limited by uint16_t)"
 #endif
 
-#if (CR_LOG_QUEUE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
-#error "CR_LOG_QUEUE_SIZE must be a power of 2"
+#if (CR_LOG_ITABLE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
+#error "CR_LOG_ITABLE_SIZE must be a power of 2"
 #endif
 
 #define CACHE_LINE_SIZE 64
@@ -1125,20 +1131,6 @@ Compile time options
                 Set this to appropriate CR_LOG_LEVEL_* to purge log function calls.
                 Any log of a lower level is replaced by a (void(0)).
                 Therefore, no runtime overhead.
-        CR_LOG_ITABLE_SIZE
-                Used to set the size of intern table inside all the contexts.
-                Only nessecary if you set scopes frequently (default size is 256).
-        CR_LOG_QUEUE_SIZE
-                Size of the internal queue used to asyncronously dispatch log calls.
-                Only tune this if you are working under extreme multithreadedthread load.
-                The default value is usually more than enough.
-                Profile using CR_LOG_TELEMETRY to see dropped items.
-        CR_LOG_ITEM_SIZE
-                Controls the size of individual items in queue.
-        CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
-                Max attempts to enqueue an item before dropping it.
-        CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
-                Used to clamp backoff spin timing.
         CR_LOG_MAX_INSTANCES
                 This controls the upper limit on how many context can be created during app lifetime.
                 This is necessary as this sets the size of how many scope_id to value any thread can handle.
@@ -1146,6 +1138,24 @@ Compile time options
                 Internally each context gets a monotonic context id,
                 Which is used to look up what scope is set for any context per thread.
                 Higher value will increase memory overhead per thread.
+        CR_LOG_ITEM_SIZE
+                Controls the size of individual items in queue.
+        CR_LOG_ITEM_FIELDS
+                Max capacity of each log item to hold fields.
+                Fields can be either format parameter or key-value pair.
+        CR_LOG_QUEUE_SIZE
+                Size of the internal queue used to asyncronously dispatch log calls.
+                Only tune this if you are working under extreme multithreadedthread load.
+                The default value is usually more than enough.
+                Profile using CR_LOG_TELEMETRY to see dropped items.
+        CR_LOG_ITABLE_SIZE
+                Used to set the size of intern table inside all the contexts.
+                Only nessecary if you set scopes frequently (default size is 256).
+                NOTE: max safe value is 1<<16 (limited by the capacity of uint16_t)
+        CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
+                Max attempts to enqueue an item before dropping it.
+        CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
+                Used to clamp backoff spin timing.
 
 Documentation
         To be added.
