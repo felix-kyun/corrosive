@@ -211,11 +211,11 @@ typedef ptrdiff_t isize;
 #endif
 
 #ifndef CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
-#define CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS 128
+#define CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS (1 << 7)
 #endif
 
 #ifndef CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
-#define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 1024
+#define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF (1 << 10)
 #endif
 
 #if (CR_LOG_ITEM_SIZE & (CR_LOG_ITEM_SIZE - 1)) != 0
@@ -1127,34 +1127,34 @@ Table Of Contents
     Credits
 
 Compile time options
-        CR_LOG_PURGE_LEVEL
+        CR_LOG_PURGE_LEVEL (default: 0 aka CR_LOG_LEVEL_TRACE)
                 Set this to appropriate CR_LOG_LEVEL_* to purge log function calls.
                 Any log of a lower level is replaced by a (void(0)).
                 Therefore, no runtime overhead.
-        CR_LOG_MAX_INSTANCES
+        CR_LOG_MAX_INSTANCES (default: 16)
                 This controls the upper limit on how many context can be created during app lifetime.
                 This is necessary as this sets the size of how many scope_id to value any thread can handle.
                 A value of 16 means, there can be total 16 context (including global one).
                 Internally each context gets a monotonic context id,
                 Which is used to look up what scope is set for any context per thread.
                 Higher value will increase memory overhead per thread.
-        CR_LOG_ITEM_SIZE
+        CR_LOG_ITEM_SIZE (default: 2^9 aka 512)
                 Controls the size of individual items in queue.
-        CR_LOG_ITEM_FIELDS
+        CR_LOG_ITEM_FIELDS (default: 16)
                 Max capacity of each log item to hold fields.
                 Fields can be either format parameter or key-value pair.
-        CR_LOG_QUEUE_SIZE
+        CR_LOG_QUEUE_SIZE (default: 2^12 aka 4096)
                 Size of the internal queue used to asyncronously dispatch log calls.
                 Only tune this if you are working under extreme multithreadedthread load.
                 The default value is usually more than enough.
                 Profile using CR_LOG_TELEMETRY to see dropped items.
-        CR_LOG_ITABLE_SIZE
+        CR_LOG_ITABLE_SIZE (default: 2^8 aka 256)
                 Used to set the size of intern table inside all the contexts.
                 Only nessecary if you set scopes frequently (default size is 256).
                 NOTE: max safe value is 1<<16 (limited by the capacity of uint16_t)
-        CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
+        CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS (default: 2^7 aka 128)
                 Max attempts to enqueue an item before dropping it.
-        CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
+        CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF (default: 2^10 aka 1024)
                 Used to clamp backoff spin timing.
 
 Documentation
