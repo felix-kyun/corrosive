@@ -106,12 +106,31 @@
 #define cr_log_fatal(...)     ((void)0)
 #endif
 
+#define CR_VALUE(v)                                                                                                    \
+    _Generic(                                                                                                          \
+        (0, v),                                                                                                        \
+        int8_t: cr_log_i64,                                                                                            \
+        int16_t: cr_log_i64,                                                                                           \
+        int32_t: cr_log_i64,                                                                                           \
+        int64_t: cr_log_i64,                                                                                           \
+        uint8_t: cr_log_u64,                                                                                           \
+        uint16_t: cr_log_u64,                                                                                          \
+        uint32_t: cr_log_u64,                                                                                          \
+        uint64_t: cr_log_u64,                                                                                          \
+        bool: cr_log_bool,                                                                                             \
+        char *: cr_log_str)(v)
+
+#define CR_LOG_KV(k, v) cr_log_kv((k), CR_VALUE(v))
+#define CR_LOG_VAR(var) CR_LOG_KV(#var, var)
+
 /*********************
  * zone:public:types *
  *********************/
 
 typedef uint8_t                 cr_log_level;
 typedef struct cr_log_ctx       cr_log_ctx;
+typedef struct cr_log_field     cr_log_field;
+typedef struct cr_log_item      cr_log_item;
 typedef struct cr_log_sink      cr_log_sink;
 typedef struct cr_log_transport cr_log_transport;
 
@@ -122,12 +141,26 @@ typedef struct cr_log_transport cr_log_transport;
 cr_log_ctx *cr_log_new_ctx();
 void        cr_log_flush_ctx(cr_log_ctx *ctx);
 void        cr_log_destory_ctx(cr_log_ctx *ctx);
-void        cr_log_set_level_ctx(cr_log_ctx *ctx, cr_log_level level);
-void        cr_log_scope_set_ctx(cr_log_ctx *ctx, const char *scope);
-int         cr_log_sink_add_ctx(cr_log_ctx *ctx, cr_log_level level, cr_log_sink *sink);
 
-[[gnu::hot, gnu::format(__printf__, 6, 7)]]
-void cr_log(cr_log_ctx *ctx, cr_log_level level, const char *file, int line, const char *func, const char *fmt, ...);
+void cr_log_set_level_ctx(cr_log_ctx *ctx, cr_log_level level);
+void cr_log_scope_set_ctx(cr_log_ctx *ctx, const char *scope);
+int  cr_log_sink_add_ctx(cr_log_ctx *ctx, cr_log_level level, cr_log_sink *sink);
+
+cr_log_field        cr_log_i64(int64_t value);
+cr_log_field        cr_log_u64(uint64_t value);
+cr_log_field        cr_log_bool(bool value);
+cr_log_field        cr_log_str(const char *value);
+inline cr_log_field cr_log_kv(const char *key, cr_log_field value);
+
+[[gnu::hot]]
+void cr_log(
+    cr_log_ctx   *ctx,
+    cr_log_level  level,
+    const char   *file,
+    int           line,
+    const char   *func,
+    const char   *message,
+    cr_log_field *fields);
 
 // global logger
 extern cr_log_ctx *global_ctx;
@@ -182,11 +215,17 @@ uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
 #include <time.h>
 #include <unistd.h>
 
+typedef int8_t    i8;
 typedef uint8_t   u8;
+typedef int16_t   i16;
+typedef uint16_t  u16;
 typedef int32_t   i32;
 typedef uint32_t  u32;
 typedef int64_t   i64;
 typedef uint64_t  u64;
+typedef float     f32;
+typedef double    f64;
+typedef bool      b8;
 typedef size_t    usize;
 typedef ptrdiff_t isize;
 
@@ -199,7 +238,7 @@ typedef ptrdiff_t isize;
 #endif
 
 #ifndef CR_LOG_ITEM_FIELDS
-#define CR_LOG_ITEM_FIELDS 16
+#define CR_LOG_ITEM_FIELDS 8
 #endif
 
 #ifndef CR_LOG_QUEUE_SIZE
@@ -259,28 +298,84 @@ typedef ptrdiff_t isize;
  * zone:private:types *
  **********************/
 
-static constexpr size_t queue_size  = CR_LOG_QUEUE_SIZE;
-static constexpr size_t buffer_size = CR_LOG_ITEM_SIZE
-    - (CACHE_LINE_SIZE           // sequence
-       + sizeof(u8)              // level
-       + sizeof(u32)             // line
-       + sizeof(const char *)    // filename
-       + sizeof(const char *)    // function
-       + sizeof(const char *)    // scope
-       + sizeof(struct timespec) // time
-       + sizeof(i64)             // scope_id
-    );
+enum cr_log_type {
+    /* NONE used as sentinal value */
+    CR_LOG_TYPE_NONE = 0,
+    CR_LOG_TYPE_U64,
+    CR_LOG_TYPE_I64,
+    CR_LOG_TYPE_BOOL,
+    CR_LOG_TYPE_STRING,
+};
 
-typedef struct cr_log_item {
+struct cr_log_field {
+    const char      *name;
+    enum cr_log_type type;
+    union {
+        u64         u;
+        i64         i;
+        b8          b;
+        const char *s;
+    } value;
+};
+
+/* used for automatic buffer size calculation depending on various configuration macros */
+struct cr_log_item_layout {
+    alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
     u8              level;
+    const char     *message;
+    struct timespec time;
     u32             line;
     const char     *filename;
     const char     *function;
     const char     *scope;
-    struct timespec time;
     i64             scope_id;
-    char            buffer[buffer_size];
-} cr_log_item;
+    cr_log_field    fields[CR_LOG_ITEM_FIELDS];
+    char           *arena_ptr;
+    char            arena[0];
+};
+
+static constexpr size_t buffer_size = CR_LOG_ITEM_SIZE - (offsetof(struct cr_log_item_layout, arena));
+static constexpr size_t queue_size  = CR_LOG_QUEUE_SIZE;
+
+struct cr_log_item {
+    u8              level;
+    const char     *message;
+    struct timespec time;
+
+    /* Caller Meta */
+    u32         line;
+    const char *filename;
+    const char *function;
+
+    /* scope_id used for transport, scope used by sinks */
+    const char *scope;
+    i64         scope_id;
+
+    /* fmt and kv fields */
+    cr_log_field fields[CR_LOG_ITEM_FIELDS];
+
+    /* Arena used for safe string field transport */
+    char *arena_ptr;
+    char  arena[buffer_size];
+};
+
+/* struct cr_log_capture
+ * Captured when calling cr_log,
+ * temporary till item is safely copied after claiming queue slot
+ */
+typedef struct cr_log_capture {
+    u8              level;
+    const char     *message;
+    struct timespec time;
+
+    u32         line;
+    const char *filename;
+    const char *function;
+
+    const char   *scope;
+    i64           scope_id;
+    cr_log_field *fields;
+} cr_log_capture;
 
 typedef struct cr_log_queue {
     alignas(CACHE_LINE_SIZE) atomic_size_t write;
@@ -291,9 +386,16 @@ typedef struct cr_log_queue {
 
     struct {
         alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
-        struct cr_log_item meta;
+        struct cr_log_item event;
     } buffer[queue_size];
 } cr_log_queue;
+
+static_assert(
+    sizeof(struct {
+        alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
+        struct cr_log_item                     event;
+    }) == CR_LOG_ITEM_SIZE,
+    "cr_log_item slot size mismatch");
 
 static_assert(
     offsetof(cr_log_queue, read) == CACHE_LINE_SIZE,
@@ -391,7 +493,10 @@ static int cr_log__transport_fd_close(cr_log_transport *transport);
 
 static int cr_log__transport_file_close(cr_log_transport *transport);
 
-static int   enqueue(cr_log_ctx *ctx, struct cr_log_item meta);
+static int          enqueue(cr_log_ctx *ctx, cr_log_capture *event);
+static inline char *cr_log_item_strdup(cr_log_item *item, const char *str);
+static int          cr_log_item_copy(cr_log_item *target, const cr_log_capture *source);
+
 static void *dequeue(void *arg);
 static void  queue_consumer(cr_log_ctx *ctx, struct cr_log_item *item);
 
@@ -596,8 +701,61 @@ cr_log_destory_ctx(cr_log_ctx *ctx)
     free(ctx);
 }
 
+static inline char *
+cr_log_item_strdup(cr_log_item *item, const char *str)
+{
+    usize len = strlen(str) + 1; // adjust for '\0'
+    if (likely(item->arena_ptr + len <= item->arena + buffer_size)) {
+        char *copy = memcpy(item->arena_ptr, str, len);
+        item->arena_ptr += len;
+        return copy;
+    }
+    return NULL;
+}
+
+static int
+cr_log_item_copy(cr_log_item *target, const cr_log_capture *source)
+{
+    int err = 0;
+
+    target->level    = source->level;
+    target->message  = source->message;
+    target->time     = source->time;
+    target->line     = source->line;
+    target->filename = source->filename;
+    target->function = source->function;
+    target->scope_id = source->scope_id;
+
+    // init arena
+    target->arena_ptr = target->arena;
+
+    // copy fields
+    for (usize i = 0; i < CR_LOG_ITEM_FIELDS; i++) {
+        cr_log_field *source_field = source->fields + i;
+        if (!source_field || source_field->type == CR_LOG_TYPE_NONE) {
+            // sentinel value
+            break;
+        }
+
+        cr_log_field *target_field = target->fields + i;
+        target_field->name         = source_field->name;
+        target_field->type         = source_field->type;
+        target_field->value        = source_field->value;
+
+        if (source_field->type == CR_LOG_TYPE_STRING && !err) {
+            // safely copy string value (using arena)
+            target_field->value.s = cr_log_item_strdup(target, source_field->value.s);
+            if (target_field->value.s == nullptr) {
+                err = 1;
+            }
+        }
+    }
+
+    return err;
+}
+
 int
-try_enqueue(cr_log_ctx *ctx, struct cr_log_item *meta)
+try_enqueue(cr_log_ctx *ctx, cr_log_capture *event)
 {
     for (;;) {
         usize write_pos = atomic_load_relaxed(&ctx->queue.write);
@@ -608,8 +766,10 @@ try_enqueue(cr_log_ctx *ctx, struct cr_log_item *meta)
         if (write_pos - seq == 0) {
             // available, try cas
             if (atomic_cas(&ctx->queue.write, &write_pos, write_pos + 1)) {
-                // claimed
-                ctx->queue.buffer[idx].meta = *meta;
+                // claimed, write
+                cr_log_item_copy(&ctx->queue.buffer[idx].event, event);
+
+                // finish
                 atomic_store_release(&ctx->queue.buffer[idx].sequence, write_pos + 1);
                 sem_post(&ctx->queue.items);
                 return 0;
@@ -625,12 +785,12 @@ try_enqueue(cr_log_ctx *ctx, struct cr_log_item *meta)
 }
 
 int
-enqueue(cr_log_ctx *ctx, struct cr_log_item meta)
+enqueue(cr_log_ctx *ctx, cr_log_capture *event)
 {
     i32 backoff = 1;
 
     for (int i = 0; i < CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS; i++) {
-        i32 ret = try_enqueue(ctx, &meta);
+        i32 ret = try_enqueue(ctx, event);
         if (ret == 0) {
             return 0;
         }
@@ -661,7 +821,7 @@ try_dequeue(cr_log_ctx *ctx)
 
     if (diff == 0) {
         // consume
-        queue_consumer(ctx, &ctx->queue.buffer[idx].meta);
+        queue_consumer(ctx, &ctx->queue.buffer[idx].event);
 
         // release
         atomic_store_relaxed(&ctx->queue.buffer[idx].sequence, read_pos + queue_size);
@@ -695,6 +855,36 @@ dequeue([[maybe_unused]] void *arg)
     return NULL;
 }
 
+cr_log_field
+cr_log_i64(i64 value)
+{
+    return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_I64, .value.i = value };
+}
+
+cr_log_field
+cr_log_u64(u64 value)
+{
+    return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_U64, .value.u = value };
+}
+
+cr_log_field
+cr_log_bool(bool value)
+{
+    return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_BOOL, .value.b = value };
+}
+
+cr_log_field
+cr_log_str(const char *value)
+{
+    return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_STRING, .value.s = value };
+}
+
+inline cr_log_field
+cr_log_kv(const char *key, cr_log_field value)
+{
+    return (cr_log_field) { .name = key, .type = value.type, .value = value.value };
+}
+
 #ifdef CR_LOG_TELEMETRY
 uint64_t
 cr_log_get_dropped_ctx(cr_log_ctx *ctx)
@@ -704,32 +894,31 @@ cr_log_get_dropped_ctx(cr_log_ctx *ctx)
 #endif
 
 void
-cr_log(cr_log_ctx *ctx, cr_log_level level, const char *file, i32 line, const char *func, const char *fmt, ...)
+cr_log(
+    cr_log_ctx   *ctx,
+    cr_log_level  level,
+    const char   *file,
+    i32           line,
+    const char   *func,
+    const char   *message,
+    cr_log_field *fields)
 {
     // runtime purge
     if (level < ctx->level) {
         return;
     }
-
-    // clang-format off
-    cr_log_item event = {
-        .level     = level,
-        .time = { 0 },
-        .filename  = file,
-        .line      = (u32)line,
-        .function  = func,
-        .scope_id = per_instance_scope[ctx->instance_id].scope_id
-    };
-    // clang-format on
+    cr_log_capture event = { .level    = level,
+                             .time     = { 0 },
+                             .filename = file,
+                             .line     = (u32)line,
+                             .function = func,
+                             .scope_id = per_instance_scope[ctx->instance_id].scope_id,
+                             .message  = message,
+                             .fields   = fields };
 
     clock_gettime(CLOCK_REALTIME_COARSE, &event.time);
 
-    va_list args;
-    va_start(args, fmt);
-    (void)vsnprintf(event.buffer, buffer_size, fmt, args);
-    va_end(args);
-
-    enqueue(ctx, event);
+    enqueue(ctx, &event);
 }
 
 // * Scope
@@ -1041,7 +1230,7 @@ cr_log__sink_text_process(cr_log_sink *sink, cr_log_item *item)
     cr_log__sink_write(sink, " ", 1);
     cr_log__sink_str(sink, item->function);
     cr_log__sink_write(sink, "] ", 2);
-    cr_log__sink_str(sink, item->buffer);
+    cr_log__sink_str(sink, item->message);
     cr_log__sink_write(sink, "\n", 1);
     // NOLINTEND(readability-magic-numbers)
 }
@@ -1140,9 +1329,10 @@ Compile time options
                 Higher value will increase memory overhead per thread.
         CR_LOG_ITEM_SIZE (default: 2^9 aka 512)
                 Controls the size of individual items in queue.
-        CR_LOG_ITEM_FIELDS (default: 16)
+        CR_LOG_ITEM_FIELDS (default: 8)
                 Max capacity of each log item to hold fields.
                 Fields can be either format parameter or key-value pair.
+                Excess fields will be dropped.
         CR_LOG_QUEUE_SIZE (default: 2^12 aka 4096)
                 Size of the internal queue used to asyncronously dispatch log calls.
                 Only tune this if you are working under extreme multithreadedthread load.
