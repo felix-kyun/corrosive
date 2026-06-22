@@ -106,7 +106,7 @@
 #define cr_log_fatal(...)     ((void)0)
 #endif
 
-#define CR_VALUE(v)                                                                                                    \
+#define CR_LOG_VALUE(v)                                                                                                \
     _Generic(                                                                                                          \
         (0, v),                                                                                                        \
         int8_t: cr_log_i64,                                                                                            \
@@ -120,8 +120,81 @@
         bool: cr_log_bool,                                                                                             \
         char *: cr_log_str)(v)
 
-#define CR_LOG_KV(k, v) cr_log_kv((k), CR_VALUE(v))
+#define CR_LOG_KV(k, v) cr_log_kv((k), CR_LOG_VALUE(v))
 #define CR_LOG_VAR(var) CR_LOG_KV(#var, var)
+
+/* Macros for auto mapping raw values to field types */
+
+/*
+ * CR_PP_EVAL(...)
+ * force preprocessor rescans
+ * at EVAL_4 with each macro containing 4 calls to previous level, this allows upto 4^4 (256) rescans
+ */
+#define CR_PP_EVAL_0(...) __VA_ARGS__
+#define CR_PP_EVAL_1(...) CR_PP_EVAL_0(CR_PP_EVAL_0(CR_PP_EVAL_0(CR_PP_EVAL_0(__VA_ARGS__))))
+#define CR_PP_EVAL_2(...) CR_PP_EVAL_1(CR_PP_EVAL_1(CR_PP_EVAL_1(CR_PP_EVAL_1(__VA_ARGS__))))
+#define CR_PP_EVAL_3(...) CR_PP_EVAL_2(CR_PP_EVAL_2(CR_PP_EVAL_2(CR_PP_EVAL_2(__VA_ARGS__))))
+#define CR_PP_EVAL_4(...) CR_PP_EVAL_3(CR_PP_EVAL_3(CR_PP_EVAL_3(CR_PP_EVAL_3(__VA_ARGS__))))
+#define CR_PP_EVAL(...)   CR_PP_EVAL_4(__VA_ARGS__)
+
+/*
+ * CR_PP_DEFER(macro)
+ * defer macro expansion, so that its not expanded immediately and cause potential a blue paint
+ */
+#define CR_PP_EMPTY()
+#define CR_PP_DEFER(macro) macro CR_PP_EMPTY()
+
+/*
+ * CR_PP_BREAK(...)
+ * empty function-like macro selected by CR_PP_CONSUME to terminate recursion
+ */
+#define CR_PP_BREAK(...)
+
+/*
+ * CR_PP_CONSUME
+ * tries to consume sentinel and replace it with '0, CR_PP_BREAK'
+ * to shift the arguments and make CR_PP_BREAK the selected function and terminate recursion
+ */
+#define CR_PP_CONSUME_0() 0, CR_PP_BREAK
+#define CR_PP_CONSUME_1() CR_PP_CONSUME_0
+#define CR_PP_CONSUME()   CR_PP_CONSUME_1
+
+/*
+ * CR_PP_SELECT(next, fn)
+ * given next token and current function, select fn or break out using CR_PP_BREAK(...)
+ *
+ * Note:
+ * 2 levels of indirection is needed as preprocessor splits arguments to a macro by comma before expanding them
+ * as such, if only one level is used, 'CR_PP_CONSUME next' will always remain single argument
+ * which breaks when CR_PP_CONSUME is replaced by '0, CR_PP_BREAK' on encountering sentinel value.
+ */
+#define CR_PP_SELECT_0(next, fn, ...) CR_PP_DEFER(fn)
+#define CR_PP_SELECT_1(next, fn, ...) CR_PP_SELECT_0(next, fn)
+#define CR_PP_SELECT(next, fn)        CR_PP_SELECT_1(CR_PP_CONSUME next, fn)
+
+/*
+ * CR_PP_MAP(fn, ...)
+ * map all the values of __VA_ARGS__ over fn
+ *
+ * NOTE:
+ * ()()() acts as sentinel
+ * fn can either be macro/expr or actual fn
+ * _0 and _1 are used to ping pong and avoid being painted blue by pre-processor
+ */
+#define CR_PP_MAP_0(fn, current, next, ...) fn(current) CR_PP_SELECT(next, CR_PP_MAP_1)(fn, next, __VA_ARGS__)
+#define CR_PP_MAP_1(fn, current, next, ...) fn(current) CR_PP_SELECT(next, CR_PP_MAP_0)(fn, next, __VA_ARGS__)
+#define CR_PP_MAP(fn, ...)                  CR_PP_EVAL(CR_PP_MAP_1(fn, __VA_ARGS__, ()()()))
+
+#define cr_log(ctx, level, message, ...)                                                                               \
+    cr_log_submit(                                                                                                     \
+        ctx,                                                                                                           \
+        level,                                                                                                         \
+        __FILE__,                                                                                                      \
+        __LINE__,                                                                                                      \
+        __func__,                                                                                                      \
+        message,                                                                                                       \
+        (cr_log_field[]) {                                                                                             \
+            __VA_OPT__(CR_PP_MAP(CR_LOG_VALUE, __VA_ARGS__), )(cr_log_field) { .type = CR_LOG_TYPE_NONE } })
 
 /*********************
  * zone:public:types *
@@ -153,7 +226,7 @@ cr_log_field        cr_log_str(const char *value);
 inline cr_log_field cr_log_kv(const char *key, cr_log_field value);
 
 [[gnu::hot]]
-void cr_log(
+void cr_log_submit(
     cr_log_ctx   *ctx,
     cr_log_level  level,
     const char   *file,
@@ -894,7 +967,7 @@ cr_log_get_dropped_ctx(cr_log_ctx *ctx)
 #endif
 
 void
-cr_log(
+cr_log_submit(
     cr_log_ctx   *ctx,
     cr_log_level  level,
     const char   *file,
