@@ -55,52 +55,49 @@
  * zone:public:macros *
  **********************/
 
-#define CR_LOG(ctx, level, ...)   cr_log(ctx, level, __FILE__, __LINE__, __func__, __VA_ARGS__)
-#define CR_LOG_GLOBAL(level, ...) cr_log(global_ctx, level, __FILE__, __LINE__, __func__, __VA_ARGS__)
-
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
-#define cr_log_trace_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
-#define cr_log_trace(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define cr_log_trace_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define cr_log_trace(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_trace_ctx(...) ((void)0)
 #define cr_log_trace(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_DEBUG
-#define cr_log_debug_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define cr_log_debug(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define cr_log_debug_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define cr_log_debug(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_debug_ctx(...) ((void)0)
 #define cr_log_debug(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_INFO
-#define cr_log_info_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define cr_log_info(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define cr_log_info_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define cr_log_info(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_info_ctx(...) ((void)0)
 #define cr_log_info(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_WARN
-#define cr_log_warn_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define cr_log_warn(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
+#define cr_log_warn_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
+#define cr_log_warn(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_warn_ctx(...) ((void)0)
 #define cr_log_warn(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_ERROR
-#define cr_log_error_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define cr_log_error(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define cr_log_error_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define cr_log_error(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_error_ctx(...) ((void)0)
 #define cr_log_error(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_FATAL
-#define cr_log_fatal_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
-#define cr_log_fatal(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
+#define cr_log_fatal_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
+#define cr_log_fatal(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
 #else
 #define cr_log_fatal_ctx(...) ((void)0)
 #define cr_log_fatal(...)     ((void)0)
