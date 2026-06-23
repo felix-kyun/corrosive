@@ -55,71 +55,6 @@
  * zone:public:macros *
  **********************/
 
-#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
-#define cr_log_trace_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
-#define cr_log_trace(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
-#else
-#define cr_log_trace_ctx(...) ((void)0)
-#define cr_log_trace(...)     ((void)0)
-#endif
-
-#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_DEBUG
-#define cr_log_debug_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define cr_log_debug(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#else
-#define cr_log_debug_ctx(...) ((void)0)
-#define cr_log_debug(...)     ((void)0)
-#endif
-
-#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_INFO
-#define cr_log_info_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define cr_log_info(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#else
-#define cr_log_info_ctx(...) ((void)0)
-#define cr_log_info(...)     ((void)0)
-#endif
-
-#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_WARN
-#define cr_log_warn_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define cr_log_warn(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#else
-#define cr_log_warn_ctx(...) ((void)0)
-#define cr_log_warn(...)     ((void)0)
-#endif
-
-#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_ERROR
-#define cr_log_error_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define cr_log_error(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#else
-#define cr_log_error_ctx(...) ((void)0)
-#define cr_log_error(...)     ((void)0)
-#endif
-
-#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_FATAL
-#define cr_log_fatal_ctx(ctx, fmt, ...) cr_log(ctx, CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
-#define cr_log_fatal(fmt, ...)          cr_log(global_ctx, CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
-#else
-#define cr_log_fatal_ctx(...) ((void)0)
-#define cr_log_fatal(...)     ((void)0)
-#endif
-
-#define CR_LOG_VALUE(v)                                                                                                \
-    _Generic(                                                                                                          \
-        (0, v),                                                                                                        \
-        int8_t: cr_log_i64,                                                                                            \
-        int16_t: cr_log_i64,                                                                                           \
-        int32_t: cr_log_i64,                                                                                           \
-        int64_t: cr_log_i64,                                                                                           \
-        uint8_t: cr_log_u64,                                                                                           \
-        uint16_t: cr_log_u64,                                                                                          \
-        uint32_t: cr_log_u64,                                                                                          \
-        uint64_t: cr_log_u64,                                                                                          \
-        bool: cr_log_bool,                                                                                             \
-        char *: cr_log_str)(v)
-
-#define CR_LOG_KV(k, v) cr_log_kv((k), CR_LOG_VALUE(v))
-#define CR_LOG_VAR(var) CR_LOG_KV(#var, var)
-
 /* Macros for auto mapping raw values to field types */
 
 /*
@@ -182,6 +117,29 @@
 #define CR_PP_MAP_1(fn, current, next, ...) fn(current) CR_PP_SELECT(next, CR_PP_MAP_0)(fn, next, __VA_ARGS__)
 #define CR_PP_MAP(fn, ...)                  CR_PP_EVAL(CR_PP_MAP_1(fn, __VA_ARGS__, ()()()))
 
+/* convert supported types to cr_log_field */
+#define CR_LOG_VALUE(v)                                                                                                \
+    _Generic(                                                                                                          \
+        (0, (v)),                                                                                                      \
+        int8_t: cr_log_i64,                                                                                            \
+        int16_t: cr_log_i64,                                                                                           \
+        int32_t: cr_log_i64,                                                                                           \
+        int64_t: cr_log_i64,                                                                                           \
+        uint8_t: cr_log_u64,                                                                                           \
+        uint16_t: cr_log_u64,                                                                                          \
+        uint32_t: cr_log_u64,                                                                                          \
+        uint64_t: cr_log_u64,                                                                                          \
+        bool: cr_log_bool,                                                                                             \
+        char *: cr_log_str,                                                                                            \
+        struct cr_log_field: cr_log_pass)(v)
+
+/* convert a key(string, not copied) value(copied) pair to cr_log_field */
+#define CR_LOG_KV(k, v) cr_log_kv((k), CR_LOG_VALUE(v))
+
+/* used to log variable values, auto convert var name to key */
+#define CR_LOG_VAR(var) CR_LOG_KV(#var, var)
+
+#define CR_LOG_AUTOWRAP(v) CR_LOG_VALUE(v),
 #define cr_log(ctx, level, message, ...)                                                                               \
     cr_log_submit(                                                                                                     \
         ctx,                                                                                                           \
@@ -191,7 +149,56 @@
         __func__,                                                                                                      \
         message,                                                                                                       \
         (cr_log_field[]) {                                                                                             \
-            __VA_OPT__(CR_PP_MAP(CR_LOG_VALUE, __VA_ARGS__), )(cr_log_field) { .type = CR_LOG_TYPE_NONE } })
+            __VA_OPT__(CR_PP_MAP(CR_LOG_AUTOWRAP, __VA_ARGS__))(cr_log_field) { .type = CR_LOG_TYPE_NONE } })
+
+/* compile time pruging */
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
+#define cr_log_trace_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_TRACE, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_trace(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_TRACE, message __VA_OPT__(, ) __VA_ARGS__)
+#else
+#define cr_log_trace_ctx(...) ((void)0)
+#define cr_log_trace(...)     ((void)0)
+#endif
+
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_DEBUG
+#define cr_log_debug_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_DEBUG, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_debug(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_DEBUG, message __VA_OPT__(, ) __VA_ARGS__)
+#else
+#define cr_log_debug_ctx(...) ((void)0)
+#define cr_log_debug(...)     ((void)0)
+#endif
+
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_INFO
+#define cr_log_info_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_INFO, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_info(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_INFO, message __VA_OPT__(, ) __VA_ARGS__)
+#else
+#define cr_log_info_ctx(...) ((void)0)
+#define cr_log_info(...)     ((void)0)
+#endif
+
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_WARN
+#define cr_log_warn_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_WARN, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_warn(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_WARN, message __VA_OPT__(, ) __VA_ARGS__)
+#else
+#define cr_log_warn_ctx(...) ((void)0)
+#define cr_log_warn(...)     ((void)0)
+#endif
+
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_ERROR
+#define cr_log_error_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_ERROR, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_error(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_ERROR, message __VA_OPT__(, ) __VA_ARGS__)
+#else
+#define cr_log_error_ctx(...) ((void)0)
+#define cr_log_error(...)     ((void)0)
+#endif
+
+#if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_FATAL
+#define cr_log_fatal_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_FATAL, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_fatal(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_FATAL, message __VA_OPT__(, ) __VA_ARGS__)
+#else
+#define cr_log_fatal_ctx(...) ((void)0)
+#define cr_log_fatal(...)     ((void)0)
+#endif
 
 /*********************
  * zone:public:types *
@@ -220,6 +227,7 @@ cr_log_field        cr_log_i64(int64_t value);
 cr_log_field        cr_log_u64(uint64_t value);
 cr_log_field        cr_log_bool(bool value);
 cr_log_field        cr_log_str(const char *value);
+inline cr_log_field cr_log_pass(cr_log_field value);
 inline cr_log_field cr_log_kv(const char *key, cr_log_field value);
 
 [[gnu::hot]]
@@ -953,6 +961,12 @@ inline cr_log_field
 cr_log_kv(const char *key, cr_log_field value)
 {
     return (cr_log_field) { .name = key, .type = value.type, .value = value.value };
+}
+
+inline cr_log_field
+cr_log_pass(cr_log_field value)
+{
+    return value;
 }
 
 #ifdef CR_LOG_TELEMETRY
