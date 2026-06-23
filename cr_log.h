@@ -1,5 +1,5 @@
 /*
-    cr_log.h - v0.7.3 - Logging Library
+    cr_log.h - v0.8.0 - Logging Library
 
     Author:   Praise Jacob <iampraisejacob@gmail.com>
     Repo:     https://github.com/felix-kyun/corrosive
@@ -154,7 +154,7 @@
 /* compile time pruging */
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
 #define cr_log_trace_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_TRACE, message __VA_OPT__(, ) __VA_ARGS__)
-#define cr_log_trace(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_TRACE, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_trace(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_TRACE, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_trace_ctx(...) ((void)0)
 #define cr_log_trace(...)     ((void)0)
@@ -162,7 +162,7 @@
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_DEBUG
 #define cr_log_debug_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_DEBUG, message __VA_OPT__(, ) __VA_ARGS__)
-#define cr_log_debug(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_DEBUG, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_debug(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_DEBUG, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_debug_ctx(...) ((void)0)
 #define cr_log_debug(...)     ((void)0)
@@ -170,7 +170,7 @@
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_INFO
 #define cr_log_info_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_INFO, message __VA_OPT__(, ) __VA_ARGS__)
-#define cr_log_info(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_INFO, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_info(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_INFO, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_info_ctx(...) ((void)0)
 #define cr_log_info(...)     ((void)0)
@@ -178,7 +178,7 @@
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_WARN
 #define cr_log_warn_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_WARN, message __VA_OPT__(, ) __VA_ARGS__)
-#define cr_log_warn(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_WARN, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_warn(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_WARN, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_warn_ctx(...) ((void)0)
 #define cr_log_warn(...)     ((void)0)
@@ -186,7 +186,7 @@
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_ERROR
 #define cr_log_error_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_ERROR, message __VA_OPT__(, ) __VA_ARGS__)
-#define cr_log_error(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_ERROR, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_error(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_ERROR, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_error_ctx(...) ((void)0)
 #define cr_log_error(...)     ((void)0)
@@ -194,7 +194,7 @@
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_FATAL
 #define cr_log_fatal_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_FATAL, message __VA_OPT__(, ) __VA_ARGS__)
-#define cr_log_fatal(message, ...)          cr_log(global_ctx, CR_LOG_LEVEL_FATAL, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_fatal(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_FATAL, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_fatal_ctx(...) ((void)0)
 #define cr_log_fatal(...)     ((void)0)
@@ -241,14 +241,14 @@ void cr_log_submit(
     cr_log_field *fields);
 
 // global logger
-extern cr_log_ctx *global_ctx;
+extern cr_log_ctx *cr_log_global_ctx;
 
-#define cr_log_init()                global_ctx = cr_log_new_ctx()
-#define cr_log_flush()               cr_log_flush_ctx(global_ctx)
-#define cr_log_destroy()             cr_log_destory_ctx(global_ctx)
-#define cr_log_set_level(level)      cr_log_set_level_ctx(global_ctx, level)
-#define cr_log_scope_set(scope)      cr_log_scope_set_ctx(global_ctx, scope)
-#define cr_log_sink_add(level, sink) cr_log_sink_add_ctx(global_ctx, level, sink)
+#define cr_log_init()                cr_log_global_ctx = cr_log_new_ctx()
+#define cr_log_flush()               cr_log_flush_ctx(cr_log_global_ctx)
+#define cr_log_destroy()             cr_log_destory_ctx(cr_log_global_ctx)
+#define cr_log_set_level(level)      cr_log_set_level_ctx(cr_log_global_ctx, level)
+#define cr_log_scope_set(scope)      cr_log_scope_set_ctx(cr_log_global_ctx, scope)
+#define cr_log_sink_add(level, sink) cr_log_sink_add_ctx(cr_log_global_ctx, level, sink)
 
 // sink
 #define cr_log_sink_text(...) cr_log_sink_text_new((cr_log_transport *[]) { __VA_ARGS__, nullptr })
@@ -259,7 +259,7 @@ cr_log_transport *cr_log_transport_fd(int fd);
 cr_log_transport *cr_log_transport_file(const char *file, int flags);
 
 #ifdef CR_LOG_TELEMETRY
-#define cr_log_get_dropped() cr_log_get_dropped_ctx(global_ctx)
+#define cr_log_get_dropped() cr_log_get_dropped_ctx(cr_log_global_ctx)
 uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
 #endif
 
@@ -293,6 +293,8 @@ uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
 #include <time.h>
 #include <unistd.h>
 
+#ifndef CR_TYPES_H
+
 typedef int8_t    i8;
 typedef uint8_t   u8;
 typedef int16_t   i16;
@@ -306,6 +308,8 @@ typedef double    f64;
 typedef bool      b8;
 typedef size_t    usize;
 typedef ptrdiff_t isize;
+
+#endif
 
 #ifndef CR_LOG_MAX_INSTANCES
 #define CR_LOG_MAX_INSTANCES 16
@@ -357,9 +361,9 @@ typedef ptrdiff_t isize;
  * zone:private:macros *
  ***********************/
 
-#define likely(x)   __builtin_expect(!!(x), 1)
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#define err(fmt, ...)                                                                                                  \
+#define cr_log__likely(x)   __builtin_expect(!!(x), 1)
+#define cr_log__unlikely(x) __builtin_expect(!!(x), 0)
+#define cr_log__err(fmt, ...)                                                                                          \
     do {                                                                                                               \
         (void)fprintf(stderr, "error(%s:%s:%d)", __FILE__, __func__, __LINE__);                                        \
         (void)fprintf(stderr, (fmt), ##__VA_ARGS__);                                                                   \
@@ -412,8 +416,8 @@ struct cr_log_item_layout {
     char            arena[0];
 };
 
-static constexpr size_t buffer_size = CR_LOG_ITEM_SIZE - (offsetof(struct cr_log_item_layout, arena));
-static constexpr size_t queue_size  = CR_LOG_QUEUE_SIZE;
+static constexpr size_t cr_log__buffer_size = CR_LOG_ITEM_SIZE - (offsetof(struct cr_log_item_layout, arena));
+static constexpr size_t cr_log__queue_size  = CR_LOG_QUEUE_SIZE;
 
 struct cr_log_item {
     u8              level;
@@ -434,7 +438,7 @@ struct cr_log_item {
 
     /* Arena used for safe string field transport */
     char *arena_ptr;
-    char  arena[buffer_size];
+    char  arena[cr_log__buffer_size];
 };
 
 /* struct cr_log_capture
@@ -465,7 +469,7 @@ typedef struct cr_log_queue {
     struct {
         alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
         struct cr_log_item event;
-    } buffer[queue_size];
+    } buffer[cr_log__queue_size];
 } cr_log_queue;
 
 static_assert(
@@ -519,10 +523,10 @@ typedef struct cr_log_ctx {
     alignas(CACHE_LINE_SIZE) cr_log_queue queue;
 } cr_log_ctx;
 
-typedef void (*process_fn)(cr_log_sink *sink, cr_log_item *item);
+typedef void (*cr_log_process_fn)(cr_log_sink *sink, cr_log_item *item);
 struct cr_log_sink {
     struct cr_log_sink *next;
-    process_fn          process;
+    cr_log_process_fn   process;
     cr_log_level        level;
 
     struct cr_log_transport *transports;
@@ -552,7 +556,7 @@ struct cr_log_transport_fd {
  * zone:private:declarations *
  *****************************/
 
-static cr_log_sink *cr_log__sink_new(process_fn process, usize bsize, struct cr_log_transport **transports);
+static cr_log_sink *cr_log__sink_new(cr_log_process_fn process, usize bsize, struct cr_log_transport **transports);
 static void         cr_log__sink_free(cr_log_sink *sink);
 static i32          cr_log__sink_flush(cr_log_sink *sink);
 
@@ -571,10 +575,12 @@ static int cr_log__transport_fd_close(cr_log_transport *transport);
 
 static int cr_log__transport_file_close(cr_log_transport *transport);
 
+static int          cr_log__try_enqueue(cr_log_ctx *ctx, cr_log_capture *event);
 static int          cr_log__enqueue(cr_log_ctx *ctx, cr_log_capture *event);
 static inline char *cr_log__item_strdup(cr_log_item *item, const char *str);
 static int          cr_log__item_copy(cr_log_item *target, const cr_log_capture *source);
 
+static int   cr_log__try_dequeue(cr_log_ctx *ctx);
 static void *cr_log__dequeue(void *arg);
 static void  cr_log__consume(cr_log_ctx *ctx, struct cr_log_item *item);
 
@@ -582,7 +588,7 @@ static void  cr_log__consume(cr_log_ctx *ctx, struct cr_log_item *item);
  * zone:private:statics *
  ************************/
 
-cr_log_ctx *global_ctx;
+cr_log_ctx *cr_log_global_ctx;
 
 // clang-format off
 static const char* cr_log_reset    = "\x1b[0m";
@@ -605,24 +611,24 @@ static const char* cr_log_level_names[] = {
 // clang-format on
 
 #ifdef CR_LOG_TELEMETRY
-alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
+alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t cr_log__drop_count;
 #endif
 
 // monotonic instance id counter
-static atomic_uint_fast16_t instance_id_counter = 0;
+static atomic_uint_fast16_t cr_log__instance_counter = 0;
 
 // per thread scope id storage
 // id is a index into the per-instance intern table
 thread_local struct {
     uint16_t scope_id;
-} per_instance_scope[CR_LOG_MAX_INSTANCES];
+} cr_log__per_instance_scope[CR_LOG_MAX_INSTANCES];
 
-static struct cr_log_transport_ops fd_ops = {
+static struct cr_log_transport_ops cr_log__fd_ops = {
     .write = cr_log__transport_fd_write,
     .close = cr_log__transport_fd_close,
 };
 
-static struct cr_log_transport_ops file_ops = {
+static struct cr_log_transport_ops cr_log__file_ops = {
     .write = cr_log__transport_fd_write,
     .close = cr_log__transport_file_close,
 };
@@ -632,7 +638,7 @@ static struct cr_log_transport_ops file_ops = {
  ************************/
 
 // NOLINTBEGIN(readability-magic-numbers)
-static const u64 pow10_table[] = {
+static const u64 cr_log__pow10_lut[] = {
     1ULL,                   // 10^0
     10ULL,                  // 10^1
     100ULL,                 // 10^2
@@ -657,19 +663,35 @@ static const u64 pow10_table[] = {
 
 //! x => floor(log10(x))
 static inline u8
-fast_log10(u64 value)
+cr_log__log10(u64 value)
 {
     //! x  =>  floor(floor(log2(x)) * log10(2))
     u8 guess = ((63 - (u8)__builtin_clzll(value | 1ULL)) * 1233) >> 12;
     u8 next  = guess + (guess < 19);
-    return guess + (value >= pow10_table[next]);
+    return guess + (value >= cr_log__pow10_lut[next]);
 }
 
 static inline u64
-fast_abs(i64 value)
+cr_log__abs(i64 value)
 {
     u64 mask = (u64)value >> 63;
     return ((u64)value + mask) ^ mask;
+}
+
+#define FNV1A_64_PRIME  0x00000100000001b3ULL
+#define FNV1A_64_OFFSET 0xcbf29ce484222325ULL
+
+static inline uint64_t
+cr_log__hash_string(const char *_key)
+{
+    u8 *key  = (u8 *)_key;
+    u64 hash = FNV1A_64_OFFSET;
+    while (*key) {
+        hash ^= *key++;
+        hash *= FNV1A_64_PRIME;
+    }
+
+    return hash;
 }
 // NOLINTEND(readability-magic-numbers)
 
@@ -685,7 +707,7 @@ cr_log_new_ctx()
         return NULL;
     }
 
-    ctx->instance_id = atomic_fetch_add_explicit(&instance_id_counter, 1, memory_order_relaxed);
+    ctx->instance_id = atomic_fetch_add_explicit(&cr_log__instance_counter, 1, memory_order_relaxed);
     ctx->level       = CR_LOG_LEVEL_INFO;
     atomic_store_relaxed(&ctx->state, true);
     ctx->sinks_head = nullptr;
@@ -703,10 +725,10 @@ cr_log_new_ctx()
     }
 
     // queue
-    for (usize i = 0; i < queue_size; i++) {
+    for (usize i = 0; i < cr_log__queue_size; i++) {
         atomic_init(&ctx->queue.buffer[i].sequence, i);
     }
-    ctx->queue.mask = queue_size - 1;
+    ctx->queue.mask = cr_log__queue_size - 1;
     atomic_init(&ctx->queue.read, 0);
     atomic_init(&ctx->queue.write, 0);
     sem_init(&ctx->queue.items, 0, 0);
@@ -783,7 +805,7 @@ static inline char *
 cr_log__item_strdup(cr_log_item *item, const char *str)
 {
     usize len = strlen(str) + 1; // adjust for '\0'
-    if (likely(item->arena_ptr + len <= item->arena + buffer_size)) {
+    if (cr_log__likely(item->arena_ptr + len <= item->arena + cr_log__buffer_size)) {
         char *copy = memcpy(item->arena_ptr, str, len);
         item->arena_ptr += len;
         return copy;
@@ -832,8 +854,8 @@ cr_log__item_copy(cr_log_item *target, const cr_log_capture *source)
     return err;
 }
 
-int
-try_enqueue(cr_log_ctx *ctx, cr_log_capture *event)
+static int
+cr_log__try_enqueue(cr_log_ctx *ctx, cr_log_capture *event)
 {
     for (;;) {
         usize write_pos = atomic_load_relaxed(&ctx->queue.write);
@@ -868,7 +890,7 @@ cr_log__enqueue(cr_log_ctx *ctx, cr_log_capture *event)
     i32 backoff = 1;
 
     for (int i = 0; i < CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS; i++) {
-        i32 ret = try_enqueue(ctx, event);
+        i32 ret = cr_log__try_enqueue(ctx, event);
         if (ret == 0) {
             return 0;
         }
@@ -889,8 +911,8 @@ cr_log__enqueue(cr_log_ctx *ctx, cr_log_capture *event)
     return -1;
 }
 
-int
-try_dequeue(cr_log_ctx *ctx)
+static int
+cr_log__try_dequeue(cr_log_ctx *ctx)
 {
     usize read_pos = atomic_load_relaxed(&ctx->queue.read);
     usize idx      = read_pos & ctx->queue.mask;
@@ -902,7 +924,7 @@ try_dequeue(cr_log_ctx *ctx)
         cr_log__consume(ctx, &ctx->queue.buffer[idx].event);
 
         // release
-        atomic_store_relaxed(&ctx->queue.buffer[idx].sequence, read_pos + queue_size);
+        atomic_store_relaxed(&ctx->queue.buffer[idx].sequence, read_pos + cr_log__queue_size);
         atomic_store_relaxed(&ctx->queue.read, read_pos + 1);
 
         return 0;
@@ -912,12 +934,12 @@ try_dequeue(cr_log_ctx *ctx)
 }
 
 void *
-cr_log__dequeue([[maybe_unused]] void *arg)
+cr_log__dequeue(void *arg)
 {
     cr_log_ctx *ctx = (cr_log_ctx *)arg;
     for (;;) {
         sem_wait(&ctx->queue.items);
-        while (try_dequeue(ctx) == 0) {
+        while (cr_log__try_dequeue(ctx) == 0) {
             if (sem_trywait(&ctx->queue.items) != 0) {
                 break;
             }
@@ -925,7 +947,7 @@ cr_log__dequeue([[maybe_unused]] void *arg)
 
         // drain on shutdown
         if (!atomic_load_relaxed(&ctx->state)) {
-            while (try_dequeue(ctx) == 0) { }
+            while (cr_log__try_dequeue(ctx) == 0) { }
             break;
         }
     }
@@ -996,7 +1018,7 @@ cr_log_submit(
                              .filename = file,
                              .line     = (u32)line,
                              .function = func,
-                             .scope_id = per_instance_scope[ctx->instance_id].scope_id,
+                             .scope_id = cr_log__per_instance_scope[ctx->instance_id].scope_id,
                              .message  = message,
                              .fields   = fields };
 
@@ -1006,26 +1028,10 @@ cr_log_submit(
 }
 
 // * Scope
-#define FNV1A_64_PRIME  0x00000100000001b3ULL
-#define FNV1A_64_OFFSET 0xcbf29ce484222325ULL
-
-static inline uint64_t
-hash_string(const char *_key)
-{
-    u8 *key  = (u8 *)_key;
-    u64 hash = FNV1A_64_OFFSET;
-    while (*key) {
-        hash ^= *key++;
-        hash *= FNV1A_64_PRIME;
-    }
-
-    return hash;
-}
-
 void
 cr_log_scope_set_ctx(cr_log_ctx *ctx, const char *scope)
 {
-    auto     hash = hash_string(scope);
+    auto     hash = cr_log__hash_string(scope);
     uint16_t idx  = hash & ctx->itable.mask;
 
     pthread_mutex_lock(&ctx->itable.write_lock);
@@ -1036,29 +1042,29 @@ cr_log_scope_set_ctx(cr_log_ctx *ctx, const char *scope)
         if (idx != 0 && !entry->used) {
             entry->key = strdup(scope);
             if (!entry->key) {
-                per_instance_scope[ctx->instance_id].scope_id = 0;
+                cr_log__per_instance_scope[ctx->instance_id].scope_id = 0;
                 goto cleanup;
             }
 
-            entry->used                                   = true;
-            entry->hash                                   = hash;
-            per_instance_scope[ctx->instance_id].scope_id = idx;
+            entry->used                                           = true;
+            entry->hash                                           = hash;
+            cr_log__per_instance_scope[ctx->instance_id].scope_id = idx;
             goto cleanup;
         } else if (entry->hash == hash && strcmp(entry->key, scope) == 0) {
-            per_instance_scope[ctx->instance_id].scope_id = idx;
+            cr_log__per_instance_scope[ctx->instance_id].scope_id = idx;
             goto cleanup;
         } else {
             idx = (idx + 1) & ctx->itable.mask;
         }
     }
-    per_instance_scope[ctx->instance_id].scope_id = 0;
+    cr_log__per_instance_scope[ctx->instance_id].scope_id = 0;
 
 cleanup:
     pthread_mutex_unlock(&ctx->itable.write_lock);
 }
 
 static inline const char *
-scope_get(cr_log_ctx *ctx, int64_t sid)
+cr_log__scope_get(cr_log_ctx *ctx, int64_t sid)
 {
     if (sid == -1) {
         return "";
@@ -1070,7 +1076,7 @@ scope_get(cr_log_ctx *ctx, int64_t sid)
 void
 cr_log__consume(cr_log_ctx *ctx, struct cr_log_item *item)
 {
-    item->scope = scope_get(ctx, item->scope_id);
+    item->scope = cr_log__scope_get(ctx, item->scope_id);
 
     cr_log_sink *sink = ctx->sinks_head;
     while (sink != NULL) {
@@ -1082,7 +1088,7 @@ cr_log__consume(cr_log_ctx *ctx, struct cr_log_item *item)
 }
 
 static cr_log_sink *
-cr_log__sink_new(process_fn process, usize bsize, struct cr_log_transport *transports[])
+cr_log__sink_new(cr_log_process_fn process, usize bsize, struct cr_log_transport *transports[])
 {
     cr_log_sink *sink = calloc(1, sizeof(cr_log_sink));
     if (sink == NULL) {
@@ -1146,7 +1152,7 @@ cr_log__sink_reserve(cr_log_sink *sink, usize size)
         return nullptr;
     }
 
-    if (likely(sink->bpos + size <= sink->bsize)) {
+    if (cr_log__likely(sink->bpos + size <= sink->bsize)) {
         return sink->buffer + sink->bpos;
     }
 
@@ -1171,7 +1177,7 @@ static i32
 cr_log__sink_write(cr_log_sink *sink, const void *src, usize size)
 {
     char *dst = cr_log__sink_reserve(sink, size);
-    if (likely(dst)) {
+    if (cr_log__likely(dst)) {
         memcpy(dst, src, size);
         cr_log__sink_advance(sink, size);
     } else {
@@ -1192,22 +1198,22 @@ cr_log__sink_str(cr_log_sink *sink, const char *str)
 }
 
 // NOLINTBEGIN(readability-magic-numbers)
-static const char digit_pairs[] = "00010203040506070809"
-                                  "10111213141516171819"
-                                  "20212223242526272829"
-                                  "30313233343536373839"
-                                  "40414243444546474849"
-                                  "50515253545556575859"
-                                  "60616263646566676869"
-                                  "70717273747576777879"
-                                  "80818283848586878889"
-                                  "90919293949596979899";
+static const char cr_log__digit_lut[] = "00010203040506070809"
+                                        "10111213141516171819"
+                                        "20212223242526272829"
+                                        "30313233343536373839"
+                                        "40414243444546474849"
+                                        "50515253545556575859"
+                                        "60616263646566676869"
+                                        "70717273747576777879"
+                                        "80818283848586878889"
+                                        "90919293949596979899";
 static i32
 cr_log__sink_u64(cr_log_sink *sink, u64 value)
 {
     char stack_buffer[32];
     // adjust to account for fast_log10 flooring
-    u8    len     = fast_log10(value) + 1;
+    u8    len     = cr_log__log10(value) + 1;
     char *ibuffer = cr_log__sink_reserve(sink, len);
 
     if (!ibuffer) {
@@ -1227,8 +1233,8 @@ cr_log__sink_u64(cr_log_sink *sink, u64 value)
         rem *= 2;
 
         idx -= 2;
-        idx[0] = digit_pairs[rem];
-        idx[1] = digit_pairs[rem + 1];
+        idx[0] = cr_log__digit_lut[rem];
+        idx[1] = cr_log__digit_lut[rem + 1];
     }
 
     if (value > 0) {
@@ -1248,9 +1254,9 @@ static i32
 cr_log__sink_i64(cr_log_sink *sink, i64 value)
 {
     char stack_buffer[32];
-    u64  uvalue = fast_abs(value);
+    u64  uvalue = cr_log__abs(value);
     // adjust to account for fast_log10 flooring and sign bit
-    u8    len     = fast_log10(uvalue) + 1 + (value < 0);
+    u8    len     = cr_log__log10(uvalue) + 1 + (value < 0);
     char *ibuffer = cr_log__sink_reserve(sink, len);
 
     if (!ibuffer) {
@@ -1270,8 +1276,8 @@ cr_log__sink_i64(cr_log_sink *sink, i64 value)
         rem *= 2;
 
         idx -= 2;
-        idx[0] = digit_pairs[rem];
-        idx[1] = digit_pairs[rem + 1];
+        idx[0] = cr_log__digit_lut[rem];
+        idx[1] = cr_log__digit_lut[rem + 1];
     }
 
     if (uvalue > 0) {
@@ -1332,7 +1338,7 @@ cr_log_transport_fd(int fd)
     if (transport == NULL) {
         return NULL;
     }
-    transport->base.ops = &fd_ops;
+    transport->base.ops = &cr_log__fd_ops;
     transport->fd       = fd;
 
     return (cr_log_transport *)transport;
@@ -1367,7 +1373,7 @@ cr_log_transport_file(const char *file, int flags)
 {
     int               fd        = open(file, flags, 0644);
     cr_log_transport *transport = cr_log_transport_fd(fd);
-    transport->ops              = &file_ops;
+    transport->ops              = &cr_log__file_ops;
     return transport;
 }
 
