@@ -571,12 +571,12 @@ static int cr_log__transport_fd_close(cr_log_transport *transport);
 
 static int cr_log__transport_file_close(cr_log_transport *transport);
 
-static int          enqueue(cr_log_ctx *ctx, cr_log_capture *event);
-static inline char *cr_log_item_strdup(cr_log_item *item, const char *str);
-static int          cr_log_item_copy(cr_log_item *target, const cr_log_capture *source);
+static int          cr_log__enqueue(cr_log_ctx *ctx, cr_log_capture *event);
+static inline char *cr_log__item_strdup(cr_log_item *item, const char *str);
+static int          cr_log__item_copy(cr_log_item *target, const cr_log_capture *source);
 
-static void *dequeue(void *arg);
-static void  queue_consumer(cr_log_ctx *ctx, struct cr_log_item *item);
+static void *cr_log__dequeue(void *arg);
+static void  cr_log__consume(cr_log_ctx *ctx, struct cr_log_item *item);
 
 /************************
  * zone:private:statics *
@@ -710,7 +710,7 @@ cr_log_new_ctx()
     atomic_init(&ctx->queue.read, 0);
     atomic_init(&ctx->queue.write, 0);
     sem_init(&ctx->queue.items, 0, 0);
-    pthread_create(&ctx->consumer, NULL, dequeue, ctx);
+    pthread_create(&ctx->consumer, NULL, cr_log__dequeue, ctx);
 
     return ctx;
 }
@@ -780,7 +780,7 @@ cr_log_destory_ctx(cr_log_ctx *ctx)
 }
 
 static inline char *
-cr_log_item_strdup(cr_log_item *item, const char *str)
+cr_log__item_strdup(cr_log_item *item, const char *str)
 {
     usize len = strlen(str) + 1; // adjust for '\0'
     if (likely(item->arena_ptr + len <= item->arena + buffer_size)) {
@@ -792,7 +792,7 @@ cr_log_item_strdup(cr_log_item *item, const char *str)
 }
 
 static int
-cr_log_item_copy(cr_log_item *target, const cr_log_capture *source)
+cr_log__item_copy(cr_log_item *target, const cr_log_capture *source)
 {
     int err = 0;
 
@@ -822,7 +822,7 @@ cr_log_item_copy(cr_log_item *target, const cr_log_capture *source)
 
         if (source_field->type == CR_LOG_TYPE_STRING && !err) {
             // safely copy string value (using arena)
-            target_field->value.s = cr_log_item_strdup(target, source_field->value.s);
+            target_field->value.s = cr_log__item_strdup(target, source_field->value.s);
             if (target_field->value.s == nullptr) {
                 err = 1;
             }
@@ -845,7 +845,7 @@ try_enqueue(cr_log_ctx *ctx, cr_log_capture *event)
             // available, try cas
             if (atomic_cas(&ctx->queue.write, &write_pos, write_pos + 1)) {
                 // claimed, write
-                cr_log_item_copy(&ctx->queue.buffer[idx].event, event);
+                cr_log__item_copy(&ctx->queue.buffer[idx].event, event);
 
                 // finish
                 atomic_store_release(&ctx->queue.buffer[idx].sequence, write_pos + 1);
@@ -863,7 +863,7 @@ try_enqueue(cr_log_ctx *ctx, cr_log_capture *event)
 }
 
 int
-enqueue(cr_log_ctx *ctx, cr_log_capture *event)
+cr_log__enqueue(cr_log_ctx *ctx, cr_log_capture *event)
 {
     i32 backoff = 1;
 
@@ -899,7 +899,7 @@ try_dequeue(cr_log_ctx *ctx)
 
     if (diff == 0) {
         // consume
-        queue_consumer(ctx, &ctx->queue.buffer[idx].event);
+        cr_log__consume(ctx, &ctx->queue.buffer[idx].event);
 
         // release
         atomic_store_relaxed(&ctx->queue.buffer[idx].sequence, read_pos + queue_size);
@@ -912,7 +912,7 @@ try_dequeue(cr_log_ctx *ctx)
 }
 
 void *
-dequeue([[maybe_unused]] void *arg)
+cr_log__dequeue([[maybe_unused]] void *arg)
 {
     cr_log_ctx *ctx = (cr_log_ctx *)arg;
     for (;;) {
@@ -1002,7 +1002,7 @@ cr_log_submit(
 
     clock_gettime(CLOCK_REALTIME_COARSE, &event.time);
 
-    enqueue(ctx, &event);
+    cr_log__enqueue(ctx, &event);
 }
 
 // * Scope
@@ -1068,7 +1068,7 @@ scope_get(cr_log_ctx *ctx, int64_t sid)
 }
 
 void
-queue_consumer(cr_log_ctx *ctx, struct cr_log_item *item)
+cr_log__consume(cr_log_ctx *ctx, struct cr_log_item *item)
 {
     item->scope = scope_get(ctx, item->scope_id);
 
