@@ -568,6 +568,9 @@ static i32 cr_log__sink_i64(cr_log_sink *sink, i64 value);
 static inline char *cr_log__sink_reserve(cr_log_sink *sink, usize size);
 static inline void  cr_log__sink_advance(cr_log_sink *sink, usize size);
 
+static inline void cr_log__sink_fmt_write(cr_log_sink *sink, const cr_log_item *item);
+static inline void cr_log__sink_write_fmt_field(cr_log_sink *sink, const cr_log_field *field);
+
 static void cr_log__sink_text_process(cr_log_sink *sink, cr_log_item *item);
 
 static int cr_log__transport_fd_write(cr_log_transport *transport, void *src, usize size);
@@ -694,6 +697,51 @@ cr_log__hash_string(const char *_key)
     return hash;
 }
 // NOLINTEND(readability-magic-numbers)
+
+static inline void
+cr_log__next_fmt_field(const cr_log_field *fields, const cr_log_field **current)
+{
+
+    // init if required
+    if (*current == nullptr) {
+        *current = fields;
+    } else if (*current - fields + 1 < CR_LOG_ITEM_FIELDS) {
+        // advance to next
+        (*current)++;
+    }
+
+    // find next
+    while (*current - fields + 1 < CR_LOG_ITEM_FIELDS && (*current)->type != CR_LOG_TYPE_NONE
+           && (*current)->name != nullptr) {
+        (*current)++;
+    }
+}
+
+static inline void
+cr_log__sink_write_fmt_field(cr_log_sink *sink, const cr_log_field *field)
+{
+    // reject kv fields
+    if (field == nullptr || field->name != nullptr) {
+        return;
+    }
+
+    switch (field->type) {
+    case CR_LOG_TYPE_U64:
+        cr_log__sink_u64(sink, field->value.u);
+        break;
+    case CR_LOG_TYPE_I64:
+        cr_log__sink_i64(sink, field->value.i);
+        break;
+    case CR_LOG_TYPE_BOOL:
+        break;
+    case CR_LOG_TYPE_STRING:
+        cr_log__sink_str(sink, field->value.s);
+        break;
+
+    default:
+        break;
+    }
+}
 
 /****************************
  * zone:private:definitions *
@@ -1298,6 +1346,49 @@ commit:
 }
 // NOLINTEND(readability-magic-numbers)
 
+static inline void
+cr_log__sink_fmt_write(cr_log_sink *sink, const cr_log_item *item)
+{
+    usize len = strlen(item->message);
+
+    // string tracking
+    usize start = 0;
+    usize end   = 0;
+
+    // field tracking
+    const cr_log_field *field = nullptr;
+
+    // 2 pointer scan
+    while (end < len) {
+        if (item->message[end] != '{') {
+            end++;
+            continue;
+        }
+
+        // found '{', find possible '}'
+        if (end + 1 < len && item->message[end + 1] == '}') {
+            // write till '{'
+            cr_log__sink_write(sink, item->message + start, end - start);
+
+            // select next formattable field
+            cr_log__next_fmt_field(item->fields, &field);
+            if (field != nullptr) {
+                cr_log__sink_write_fmt_field(sink, field);
+            }
+
+            // advance
+            end += 2;
+            start = end;
+            continue;
+        }
+    }
+
+    // write remaining, if any
+    if (start < end) {
+        cr_log__sink_write(sink, item->message + start, end - start);
+    }
+}
+
 static void
 cr_log__sink_text_process(cr_log_sink *sink, cr_log_item *item)
 {
@@ -1320,7 +1411,9 @@ cr_log__sink_text_process(cr_log_sink *sink, cr_log_item *item)
     cr_log__sink_write(sink, " ", 1);
     cr_log__sink_str(sink, item->function);
     cr_log__sink_write(sink, "] ", 2);
-    cr_log__sink_str(sink, item->message);
+
+    cr_log__sink_fmt_write(sink, item);
+
     cr_log__sink_write(sink, "\n", 1);
     // NOLINTEND(readability-magic-numbers)
 }
