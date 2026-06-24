@@ -564,6 +564,7 @@ static i32 cr_log__sink_write(cr_log_sink *sink, const void *src, usize size);
 static i32 cr_log__sink_str(cr_log_sink *sink, const char *str);
 static i32 cr_log__sink_u64(cr_log_sink *sink, u64 value);
 static i32 cr_log__sink_i64(cr_log_sink *sink, i64 value);
+static i32 cr_log__sink_bool(cr_log_sink *sink, b8 value);
 
 static inline char *cr_log__sink_reserve(cr_log_sink *sink, usize size);
 static inline void  cr_log__sink_advance(cr_log_sink *sink, usize size);
@@ -733,6 +734,7 @@ cr_log__sink_write_fmt_field(cr_log_sink *sink, const cr_log_field *field)
         cr_log__sink_i64(sink, field->value.i);
         break;
     case CR_LOG_TYPE_BOOL:
+        cr_log__sink_bool(sink, field->value.b);
         break;
     case CR_LOG_TYPE_STRING:
         cr_log__sink_str(sink, field->value.s);
@@ -1344,6 +1346,19 @@ commit:
     cr_log__sink_advance(sink, len);
     return 0;
 }
+
+static i32
+cr_log__sink_bool(cr_log_sink *sink, b8 value)
+{
+    if (value) {
+        cr_log__sink_write(sink, "true", 4);
+    } else {
+        cr_log__sink_write(sink, "false", 5);
+    }
+
+    return 0;
+}
+
 // NOLINTEND(readability-magic-numbers)
 
 static inline void
