@@ -1,31 +1,41 @@
 /*
-    cr_log.h - v0.8.0 - Logging Library
-
-    Author:   Praise Jacob <iampraisejacob@gmail.com>
-    Repo:     https://github.com/felix-kyun/corrosive
-
-    SPDX-License-Identifier: MIT
-    Copyright (c) 2026 Praise Jacob
-
-    For other informations, see the end of this file.
- */
-
-/*
+ * cr_log.h - v0.8.0 - Logging Library
+ *
+ * Author:   Praise Jacob <iampraisejacob@gmail.com>
+ * Repo:     https://github.com/felix-kyun/corrosive
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Praise Jacob
+ *
+ * A single header library that provides logging functions.
+ * Part of the Corrosive library.
+ *
+ * To use this library, do this in *one* of your source files:
+ * 		#define CR_LOG_IMPL
+ * 		#include "cr_log.h"
+ *
  * Table Of Contents
- * zones
- * 	  public
- *		configs
- *		macros
- *		types
- *		declarations
- * 	  private
- *		configs
- *		macros
- *		types
- *		declarations
- *		statics
- *		helpers
- *		definitions
+ * 	- Zones (code)
+ *    	- public
+ *    		- configs
+ *    		- macros
+ *    		- types
+ *    		- declarations
+ *     	- private
+ *    		- configs
+ *    		- macros
+ *    		- types
+ *    		- declarations
+ *    		- statics
+ *    		- helpers
+ *    		- definitions
+ *  - Compile time options
+ *  - Documentation
+ *  - Examples
+ *  - License
+ *  - Credits
+ *
+ * For other informations, see the end of this file.
  */
 
 #ifndef CR_LOG_H
@@ -263,13 +273,8 @@ cr_log_transport *cr_log_transport_file(const char *file, int flags);
 uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
 #endif
 
+/******************************  Implementation  ******************************/
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
-
-/*
- * ======================================================
- * ================== Implementation ====================
- * ======================================================
- */
 
 /************************
  * zone:private:configs *
@@ -293,6 +298,7 @@ uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
 #include <time.h>
 #include <unistd.h>
 
+// cr_types.h
 #ifndef CR_TYPES_H
 
 typedef int8_t    i8;
@@ -1492,66 +1498,58 @@ cr_log__transport_file_close(cr_log_transport *transport)
     return 0;
 }
 
-// }}}
-// }}}
-
 #endif // CR_LOG_IMPL
 #endif // CR_LOG_H
 
-/*
-This is a single header library that provides logging functions.
-This is part of the Corrosive library.
+/*******************************************************************************
 
-To use this library, do this in *one* of your source files:
-    #define CR_LOG_IMPL
-    #include "cr_log.h"
+- Compile time options
 
-Table Of Contents
-    Compile time options
-    Documentation
-    Examples
-    License
-    Credits
+    CR_LOG_PURGE_LEVEL (default: 0 aka CR_LOG_LEVEL_TRACE)
+        Set this to appropriate CR_LOG_LEVEL_* to purge log function calls.
+        Any log of a lower level is replaced by a (void(0)).
+        Therefore, no runtime overhead.
 
-Compile time options
-        CR_LOG_PURGE_LEVEL (default: 0 aka CR_LOG_LEVEL_TRACE)
-                Set this to appropriate CR_LOG_LEVEL_* to purge log function calls.
-                Any log of a lower level is replaced by a (void(0)).
-                Therefore, no runtime overhead.
-        CR_LOG_MAX_INSTANCES (default: 16)
-                This controls the upper limit on how many context can be created during app lifetime.
-                This is necessary as this sets the size of how many scope_id to value any thread can handle.
-                A value of 16 means, there can be total 16 context (including global one).
-                Internally each context gets a monotonic context id,
-                Which is used to look up what scope is set for any context per thread.
-                Higher value will increase memory overhead per thread.
-        CR_LOG_ITEM_SIZE (default: 2^9 aka 512)
-                Controls the size of individual items in queue.
-        CR_LOG_ITEM_FIELDS (default: 8)
-                Max capacity of each log item to hold fields.
-                Fields can be either format parameter or key-value pair.
-                Excess fields will be dropped.
-        CR_LOG_QUEUE_SIZE (default: 2^12 aka 4096)
-                Size of the internal queue used to asyncronously dispatch log calls.
-                Only tune this if you are working under extreme multithreadedthread load.
-                The default value is usually more than enough.
-                Profile using CR_LOG_TELEMETRY to see dropped items.
-        CR_LOG_ITABLE_SIZE (default: 2^8 aka 256)
-                Used to set the size of intern table inside all the contexts.
-                Only nessecary if you set scopes frequently (default size is 256).
-                NOTE: max safe value is 1<<16 (limited by the capacity of uint16_t)
-        CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS (default: 2^7 aka 128)
-                Max attempts to enqueue an item before dropping it.
-        CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF (default: 2^10 aka 1024)
-                Used to clamp backoff spin timing.
+    CR_LOG_MAX_INSTANCES (default: 16)
+        This controls the upper limit on how many context can be created during app lifetime.
+        This is necessary as this sets the size of how many scope_id to value any thread can handle.
+        A value of 16 means, there can be total 16 context (including global one).
+        Internally each context gets a monotonic context id,
+        Which is used to look up what scope is set for any context per thread.
+        Higher value will increase memory overhead per thread.
 
-Documentation
-        To be added.
+    CR_LOG_ITEM_SIZE (default: 2^9 aka 512)
+        Controls the size of individual items in queue.
 
-Examples
-        To be added.
+    CR_LOG_ITEM_FIELDS (default: 8)
+        Max capacity of each log item to hold fields.
+        Fields can be either format parameter or key-value pair.
+        Excess fields will be dropped.
 
-MIT License
+    CR_LOG_QUEUE_SIZE (default: 2^12 aka 4096)
+        Size of the internal queue used to asyncronously dispatch log calls.
+        Only tune this if you are working under extreme multithreadedthread load.
+        The default value is usually more than enough.
+        Profile using CR_LOG_TELEMETRY to see dropped items.
+
+    CR_LOG_ITABLE_SIZE (default: 2^8 aka 256)
+        Used to set the size of intern table inside all the contexts.
+        Only nessecary if you set scopes frequently (default size is 256).
+        NOTE: max safe value is 1<<16 (limited by the capacity of uint16_t)
+
+    CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS (default: 2^7 aka 128)
+        Max attempts to enqueue an item before dropping it.
+
+    CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF (default: 2^10 aka 1024)
+        Used to clamp backoff spin timing.
+
+- Documentation
+    To be added.
+
+- Examples
+    To be added.
+
+- MIT License
     Copyright (c) 2026 Praise Jacob <iampraisejacob@gmail.com>
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -1575,4 +1573,5 @@ MIT License
 Credits
     Praise Jacob 	library API/implementation
     Sean Barret 	built STB which inspired this library
- */
+
+*******************************************************************************/
