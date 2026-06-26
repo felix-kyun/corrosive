@@ -1,5 +1,5 @@
 /*
- * cr_log.h - v0.9.0 - Logging Library
+ * cr_log.h - v0.9.1 - Logging Library
  *
  * Author:   Praise Jacob <iampraisejacob@gmail.com>
  * Repo:     https://github.com/felix-kyun/corrosive
@@ -1542,7 +1542,32 @@ cr_log__transport_file_close(cr_log_transport *transport)
     To be added.
 
 - Examples
-    To be added.
+    - Global api
+            cr_log_init();
+            cr_log_set_level(CR_LOG_LEVEL_DEBUG);
+            cr_log_sink_add(CR_LOG_LEVEL_DEBUG, cr_log_sink_text(cr_log_transport_fd(STDERR_FILENO)));
+
+            cr_log_scope_set("test");
+            cr_log_info("Hello, World!");
+
+            cr_log_destroy();
+    - Context api
+            cr_log_ctx *logger = cr_log_new_ctx();
+            cr_log_set_level_ctx(logger, CR_LOG_LEVEL_DEBUG);
+            cr_log_sink_add_ctx(logger, CR_LOG_LEVEL_DEBUG, cr_log_sink_text(cr_log_transport_fd(STDERR_FILENO)));
+
+            cr_log_info_ctx(logger, "Hello, World!");
+
+            cr_log_destory_ctx(logger);
+    - Formatting and structured logging
+            char *name = "felix";
+
+            cr_log_info("Hello, {}!", name); 			// Hello, felix!
+            cr_log_debug("is {} == {} ??", 123, 456); 	// is 123 == 456 ??
+            cr_log_debug("is true == {} ??", true); 	// is true == true ??
+            cr_log_trace("kv test", CR_LOG_VAR(name)); 	// kv test name=felix
+            cr_log_trace("user logged in", CR_LOG_KV("name", name)); 	// kv test name=felix
+
 
 - MIT License
     Copyright (c) 2026 Praise Jacob <iampraisejacob@gmail.com>
