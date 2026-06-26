@@ -1,31 +1,41 @@
 /*
-    cr_log.h - v0.7.3 - Logging Library
-
-    Author:   Praise Jacob <iampraisejacob@gmail.com>
-    Repo:     https://github.com/felix-kyun/corrosive
-
-    SPDX-License-Identifier: MIT
-    Copyright (c) 2026 Praise Jacob
-
-    For other informations, see the end of this file.
- */
-
-/*
+ * cr_log.h - v0.8.0 - Logging Library
+ *
+ * Author:   Praise Jacob <iampraisejacob@gmail.com>
+ * Repo:     https://github.com/felix-kyun/corrosive
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Praise Jacob
+ *
+ * A single header library that provides logging functions.
+ * Part of the Corrosive library.
+ *
+ * To use this library, do this in *one* of your source files:
+ * 		#define CR_LOG_IMPL
+ * 		#include "cr_log.h"
+ *
  * Table Of Contents
- * zones
- * 	  public
- *		configs
- *		macros
- *		types
- *		declarations
- * 	  private
- *		configs
- *		macros
- *		types
- *		declarations
- *		statics
- *		helpers
- *		definitions
+ * 	- Zones (code)
+ *    	- public
+ *    		- configs
+ *    		- macros
+ *    		- types
+ *    		- declarations
+ *     	- private
+ *    		- configs
+ *    		- macros
+ *    		- types
+ *    		- declarations
+ *    		- statics
+ *    		- helpers
+ *    		- definitions
+ *  - Compile time options
+ *  - Documentation
+ *  - Examples
+ *  - License
+ *  - Credits
+ *
+ * For other informations, see the end of this file.
  */
 
 #ifndef CR_LOG_H
@@ -51,82 +61,150 @@
 #define CR_LOG_PURGE_LEVEL CR_LOG_LEVEL_TRACE
 #endif
 
-// safe upto 1 << 16 (limited by uint16_t)
-// intern tables are per instance
-#ifndef CR_LOG_ITABLE_SIZE
-#define CR_LOG_ITABLE_SIZE (1 << 8)
-#endif
-
-#ifndef CR_LOG_QUEUE_SIZE
-#define CR_LOG_QUEUE_SIZE (1 << 12)
-#endif
-
-#ifndef CR_LOG_QUEUE_ITEM_SIZE
-#define CR_LOG_QUEUE_ITEM_SIZE 512
-#endif
-
-#ifndef CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
-#define CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS 128
-#endif
-
-#ifndef CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
-#define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF 1024
-#endif
-
-#ifndef CR_LOG_MAX_INSTANCES
-#define CR_LOG_MAX_INSTANCES 16
-#endif
-
 /**********************
  * zone:public:macros *
  **********************/
 
-#define CR_LOG(ctx, level, ...)   cr_log(ctx, level, __FILE__, __LINE__, __func__, __VA_ARGS__)
-#define CR_LOG_GLOBAL(level, ...) cr_log(global_ctx, level, __FILE__, __LINE__, __func__, __VA_ARGS__)
+/* Macros for auto mapping raw values to field types */
 
+/*
+ * CR_PP_EVAL(...)
+ * force preprocessor rescans
+ * at EVAL_4 with each macro containing 4 calls to previous level, this allows upto 4^4 (256) rescans
+ */
+#define CR_PP_EVAL_0(...) __VA_ARGS__
+#define CR_PP_EVAL_1(...) CR_PP_EVAL_0(CR_PP_EVAL_0(CR_PP_EVAL_0(CR_PP_EVAL_0(__VA_ARGS__))))
+#define CR_PP_EVAL_2(...) CR_PP_EVAL_1(CR_PP_EVAL_1(CR_PP_EVAL_1(CR_PP_EVAL_1(__VA_ARGS__))))
+#define CR_PP_EVAL_3(...) CR_PP_EVAL_2(CR_PP_EVAL_2(CR_PP_EVAL_2(CR_PP_EVAL_2(__VA_ARGS__))))
+#define CR_PP_EVAL_4(...) CR_PP_EVAL_3(CR_PP_EVAL_3(CR_PP_EVAL_3(CR_PP_EVAL_3(__VA_ARGS__))))
+#define CR_PP_EVAL(...)   CR_PP_EVAL_4(__VA_ARGS__)
+
+/*
+ * CR_PP_DEFER(macro)
+ * defer macro expansion, so that its not expanded immediately and cause potential a blue paint
+ */
+#define CR_PP_EMPTY()
+#define CR_PP_DEFER(macro) macro CR_PP_EMPTY()
+
+/*
+ * CR_PP_BREAK(...)
+ * empty function-like macro selected by CR_PP_CONSUME to terminate recursion
+ */
+#define CR_PP_BREAK(...)
+
+/*
+ * CR_PP_CONSUME
+ * tries to consume sentinel and replace it with '0, CR_PP_BREAK'
+ * to shift the arguments and make CR_PP_BREAK the selected function and terminate recursion
+ */
+#define CR_PP_CONSUME_0() 0, CR_PP_BREAK
+#define CR_PP_CONSUME_1() CR_PP_CONSUME_0
+#define CR_PP_CONSUME()   CR_PP_CONSUME_1
+
+/*
+ * CR_PP_SELECT(next, fn)
+ * given next token and current function, select fn or break out using CR_PP_BREAK(...)
+ *
+ * Note:
+ * 2 levels of indirection is needed as preprocessor splits arguments to a macro by comma before expanding them
+ * as such, if only one level is used, 'CR_PP_CONSUME next' will always remain single argument
+ * which breaks when CR_PP_CONSUME is replaced by '0, CR_PP_BREAK' on encountering sentinel value.
+ */
+#define CR_PP_SELECT_0(next, fn, ...) CR_PP_DEFER(fn)
+#define CR_PP_SELECT_1(next, fn, ...) CR_PP_SELECT_0(next, fn)
+#define CR_PP_SELECT(next, fn)        CR_PP_SELECT_1(CR_PP_CONSUME next, fn)
+
+/*
+ * CR_PP_MAP(fn, ...)
+ * map all the values of __VA_ARGS__ over fn
+ *
+ * NOTE:
+ * ()()() acts as sentinel
+ * fn can either be macro/expr or actual fn
+ * _0 and _1 are used to ping pong and avoid being painted blue by pre-processor
+ */
+#define CR_PP_MAP_0(fn, current, next, ...) fn(current) CR_PP_SELECT(next, CR_PP_MAP_1)(fn, next, __VA_ARGS__)
+#define CR_PP_MAP_1(fn, current, next, ...) fn(current) CR_PP_SELECT(next, CR_PP_MAP_0)(fn, next, __VA_ARGS__)
+#define CR_PP_MAP(fn, ...)                  CR_PP_EVAL(CR_PP_MAP_1(fn, __VA_ARGS__, ()()()))
+
+/* convert supported types to cr_log_field */
+#define CR_LOG_VALUE(v)                                                                                                \
+    _Generic(                                                                                                          \
+        (0, (v)),                                                                                                      \
+        int8_t: cr_log_i64,                                                                                            \
+        int16_t: cr_log_i64,                                                                                           \
+        int32_t: cr_log_i64,                                                                                           \
+        int64_t: cr_log_i64,                                                                                           \
+        uint8_t: cr_log_u64,                                                                                           \
+        uint16_t: cr_log_u64,                                                                                          \
+        uint32_t: cr_log_u64,                                                                                          \
+        uint64_t: cr_log_u64,                                                                                          \
+        bool: cr_log_bool,                                                                                             \
+        char *: cr_log_str,                                                                                            \
+        struct cr_log_field: cr_log_pass)(v)
+
+/* convert a key(string, not copied) value(copied) pair to cr_log_field */
+#define CR_LOG_KV(k, v) cr_log_kv((k), CR_LOG_VALUE(v))
+
+/* used to log variable values, auto convert var name to key */
+#define CR_LOG_VAR(var) CR_LOG_KV(#var, var)
+
+#define CR_LOG_AUTOWRAP(v) CR_LOG_VALUE(v),
+#define cr_log(ctx, level, message, ...)                                                                               \
+    cr_log_submit(                                                                                                     \
+        ctx,                                                                                                           \
+        level,                                                                                                         \
+        __FILE__,                                                                                                      \
+        __LINE__,                                                                                                      \
+        __func__,                                                                                                      \
+        message,                                                                                                       \
+        (cr_log_field[]) {                                                                                             \
+            __VA_OPT__(CR_PP_MAP(CR_LOG_AUTOWRAP, __VA_ARGS__))(cr_log_field) { .type = CR_LOG_TYPE_NONE } })
+
+/* compile time pruging */
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_TRACE
-#define cr_log_trace_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
-#define cr_log_trace(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define cr_log_trace_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_TRACE, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_trace(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_TRACE, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_trace_ctx(...) ((void)0)
 #define cr_log_trace(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_DEBUG
-#define cr_log_debug_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define cr_log_debug(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define cr_log_debug_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_DEBUG, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_debug(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_DEBUG, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_debug_ctx(...) ((void)0)
 #define cr_log_debug(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_INFO
-#define cr_log_info_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define cr_log_info(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define cr_log_info_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_INFO, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_info(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_INFO, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_info_ctx(...) ((void)0)
 #define cr_log_info(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_WARN
-#define cr_log_warn_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define cr_log_warn(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
+#define cr_log_warn_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_WARN, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_warn(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_WARN, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_warn_ctx(...) ((void)0)
 #define cr_log_warn(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_ERROR
-#define cr_log_error_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define cr_log_error(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define cr_log_error_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_ERROR, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_error(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_ERROR, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_error_ctx(...) ((void)0)
 #define cr_log_error(...)     ((void)0)
 #endif
 
 #if CR_LOG_PURGE_LEVEL <= CR_LOG_LEVEL_FATAL
-#define cr_log_fatal_ctx(ctx, fmt, ...) CR_LOG(ctx, CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
-#define cr_log_fatal(fmt, ...)          CR_LOG_GLOBAL(CR_LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
+#define cr_log_fatal_ctx(ctx, message, ...) cr_log(ctx, CR_LOG_LEVEL_FATAL, message __VA_OPT__(, ) __VA_ARGS__)
+#define cr_log_fatal(message, ...) cr_log(cr_log_global_ctx, CR_LOG_LEVEL_FATAL, message __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define cr_log_fatal_ctx(...) ((void)0)
 #define cr_log_fatal(...)     ((void)0)
@@ -138,6 +216,8 @@
 
 typedef uint8_t                 cr_log_level;
 typedef struct cr_log_ctx       cr_log_ctx;
+typedef struct cr_log_field     cr_log_field;
+typedef struct cr_log_item      cr_log_item;
 typedef struct cr_log_sink      cr_log_sink;
 typedef struct cr_log_transport cr_log_transport;
 
@@ -148,22 +228,37 @@ typedef struct cr_log_transport cr_log_transport;
 cr_log_ctx *cr_log_new_ctx();
 void        cr_log_flush_ctx(cr_log_ctx *ctx);
 void        cr_log_destory_ctx(cr_log_ctx *ctx);
-void        cr_log_set_level_ctx(cr_log_ctx *ctx, cr_log_level level);
-void        cr_log_scope_set_ctx(cr_log_ctx *ctx, const char *scope);
-int         cr_log_sink_add_ctx(cr_log_ctx *ctx, cr_log_level level, cr_log_sink *sink);
 
-[[gnu::hot, gnu::format(__printf__, 6, 7)]]
-void cr_log(cr_log_ctx *ctx, cr_log_level level, const char *file, int line, const char *func, const char *fmt, ...);
+void cr_log_set_level_ctx(cr_log_ctx *ctx, cr_log_level level);
+void cr_log_scope_set_ctx(cr_log_ctx *ctx, const char *scope);
+int  cr_log_sink_add_ctx(cr_log_ctx *ctx, cr_log_level level, cr_log_sink *sink);
+
+cr_log_field        cr_log_i64(int64_t value);
+cr_log_field        cr_log_u64(uint64_t value);
+cr_log_field        cr_log_bool(bool value);
+cr_log_field        cr_log_str(const char *value);
+inline cr_log_field cr_log_pass(cr_log_field value);
+inline cr_log_field cr_log_kv(const char *key, cr_log_field value);
+
+[[gnu::hot]]
+void cr_log_submit(
+    cr_log_ctx   *ctx,
+    cr_log_level  level,
+    const char   *file,
+    int           line,
+    const char   *func,
+    const char   *message,
+    cr_log_field *fields);
 
 // global logger
-extern cr_log_ctx *global_ctx;
+extern cr_log_ctx *cr_log_global_ctx;
 
-#define cr_log_init()                global_ctx = cr_log_new_ctx()
-#define cr_log_flush()               cr_log_flush_ctx(global_ctx)
-#define cr_log_destroy()             cr_log_destory_ctx(global_ctx)
-#define cr_log_set_level(level)      cr_log_set_level_ctx(global_ctx, level)
-#define cr_log_scope_set(scope)      cr_log_scope_set_ctx(global_ctx, scope)
-#define cr_log_sink_add(level, sink) cr_log_sink_add_ctx(global_ctx, level, sink)
+#define cr_log_init()                cr_log_global_ctx = cr_log_new_ctx()
+#define cr_log_flush()               cr_log_flush_ctx(cr_log_global_ctx)
+#define cr_log_destroy()             cr_log_destory_ctx(cr_log_global_ctx)
+#define cr_log_set_level(level)      cr_log_set_level_ctx(cr_log_global_ctx, level)
+#define cr_log_scope_set(scope)      cr_log_scope_set_ctx(cr_log_global_ctx, scope)
+#define cr_log_sink_add(level, sink) cr_log_sink_add_ctx(cr_log_global_ctx, level, sink)
 
 // sink
 #define cr_log_sink_text(...) cr_log_sink_text_new((cr_log_transport *[]) { __VA_ARGS__, nullptr })
@@ -174,33 +269,16 @@ cr_log_transport *cr_log_transport_fd(int fd);
 cr_log_transport *cr_log_transport_file(const char *file, int flags);
 
 #ifdef CR_LOG_TELEMETRY
-#define cr_log_get_dropped() cr_log_get_dropped_ctx(global_ctx)
+#define cr_log_get_dropped() cr_log_get_dropped_ctx(cr_log_global_ctx)
 uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
 #endif
 
+/******************************  Implementation  ******************************/
 #if defined(CR_LOG_IMPL) || defined(CORROSIVE_IMPLEMENTATION)
-
-/*
- * ======================================================
- * ================== Implementation ====================
- * ======================================================
- */
 
 /************************
  * zone:private:configs *
  ************************/
-
-#if (CR_LOG_ITABLE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
-#error "CR_LOG_ITABLE_SIZE must be a power of 2"
-#endif
-
-#if CR_LOG_ITABLE_SIZE >= (1 << 16)
-#error "CR_LOG_ITABLE_SIZE must be less than 2^16 (limited by uint16_t)"
-#endif
-
-#if (CR_LOG_QUEUE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
-#error "CR_LOG_QUEUE_SIZE must be a power of 2"
-#endif
 
 #include <fcntl.h>
 #include <immintrin.h>
@@ -220,13 +298,68 @@ uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
 #include <time.h>
 #include <unistd.h>
 
+// cr_types.h
+#ifndef CR_TYPES_H
+
+typedef int8_t    i8;
 typedef uint8_t   u8;
+typedef int16_t   i16;
+typedef uint16_t  u16;
 typedef int32_t   i32;
 typedef uint32_t  u32;
 typedef int64_t   i64;
 typedef uint64_t  u64;
+typedef float     f32;
+typedef double    f64;
+typedef bool      b8;
 typedef size_t    usize;
 typedef ptrdiff_t isize;
+
+#endif
+
+#ifndef CR_LOG_MAX_INSTANCES
+#define CR_LOG_MAX_INSTANCES 16
+#endif
+
+#ifndef CR_LOG_ITEM_SIZE
+#define CR_LOG_ITEM_SIZE (1 << 9)
+#endif
+
+#ifndef CR_LOG_ITEM_FIELDS
+#define CR_LOG_ITEM_FIELDS 8
+#endif
+
+#ifndef CR_LOG_QUEUE_SIZE
+#define CR_LOG_QUEUE_SIZE (1 << 12)
+#endif
+
+#ifndef CR_LOG_ITABLE_SIZE
+#define CR_LOG_ITABLE_SIZE (1 << 8)
+#endif
+
+#ifndef CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
+#define CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS (1 << 7)
+#endif
+
+#ifndef CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
+#define CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF (1 << 10)
+#endif
+
+#if (CR_LOG_ITEM_SIZE & (CR_LOG_ITEM_SIZE - 1)) != 0
+#error "CR_LOG_ITEM_SIZE is not a power of 2"
+#endif
+
+#if (CR_LOG_QUEUE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
+#error "CR_LOG_QUEUE_SIZE must be a power of 2"
+#endif
+
+#if CR_LOG_ITABLE_SIZE >= (1 << 16)
+#error "CR_LOG_ITABLE_SIZE must be less than 2^16 (limited by uint16_t)"
+#endif
+
+#if (CR_LOG_ITABLE_SIZE & (CR_LOG_ITABLE_SIZE - 1)) != 0
+#error "CR_LOG_ITABLE_SIZE must be a power of 2"
+#endif
 
 #define CACHE_LINE_SIZE 64
 
@@ -234,13 +367,18 @@ typedef ptrdiff_t isize;
  * zone:private:macros *
  ***********************/
 
-#define likely(x)   __builtin_expect(!!(x), 1)
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#define err(fmt, ...)                                                                                                  \
+#define cr_log__likely(x)   __builtin_expect(!!(x), 1)
+#define cr_log__unlikely(x) __builtin_expect(!!(x), 0)
+#define cr_log__err(fmt, ...)                                                                                          \
     do {                                                                                                               \
         (void)fprintf(stderr, "error(%s:%s:%d)", __FILE__, __func__, __LINE__);                                        \
         (void)fprintf(stderr, (fmt), ##__VA_ARGS__);                                                                   \
     } while (0)
+
+#define cr_log__iter_field(field_arr, label)                                                                           \
+    for (cr_log_field * (label) = field_arr;                                                                           \
+         (label) - (field_arr) < CR_LOG_ITEM_FIELDS && (label)->type != CR_LOG_TYPE_NONE;                              \
+         (label)++)
 
 #define atomic_load_relaxed(target)         atomic_load_explicit(target, memory_order_relaxed)
 #define atomic_load_acquire(target)         atomic_load_explicit(target, memory_order_acquire)
@@ -253,28 +391,84 @@ typedef ptrdiff_t isize;
  * zone:private:types *
  **********************/
 
-static constexpr size_t queue_size  = CR_LOG_QUEUE_SIZE;
-static constexpr size_t buffer_size = CR_LOG_QUEUE_ITEM_SIZE
-    - (CACHE_LINE_SIZE           // sequence
-       + sizeof(u8)              // level
-       + sizeof(u32)             // line
-       + sizeof(const char *)    // filename
-       + sizeof(const char *)    // function
-       + sizeof(const char *)    // scope
-       + sizeof(struct timespec) // time
-       + sizeof(i64)             // scope_id
-    );
+enum cr_log_type {
+    /* NONE used as sentinal value */
+    CR_LOG_TYPE_NONE = 0,
+    CR_LOG_TYPE_U64,
+    CR_LOG_TYPE_I64,
+    CR_LOG_TYPE_BOOL,
+    CR_LOG_TYPE_STRING,
+};
 
-typedef struct cr_log_item {
+struct cr_log_field {
+    const char      *name;
+    enum cr_log_type type;
+    union {
+        u64         u;
+        i64         i;
+        b8          b;
+        const char *s;
+    } value;
+};
+
+/* used for automatic buffer size calculation depending on various configuration macros */
+struct cr_log_item_layout {
+    alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
     u8              level;
+    const char     *message;
+    struct timespec time;
     u32             line;
     const char     *filename;
     const char     *function;
     const char     *scope;
-    struct timespec time;
     i64             scope_id;
-    char            buffer[buffer_size];
-} cr_log_item;
+    cr_log_field    fields[CR_LOG_ITEM_FIELDS];
+    char           *arena_ptr;
+    char            arena[0];
+};
+
+static constexpr size_t cr_log__buffer_size = CR_LOG_ITEM_SIZE - (offsetof(struct cr_log_item_layout, arena));
+static constexpr size_t cr_log__queue_size  = CR_LOG_QUEUE_SIZE;
+
+struct cr_log_item {
+    u8              level;
+    const char     *message;
+    struct timespec time;
+
+    /* Caller Meta */
+    u32         line;
+    const char *filename;
+    const char *function;
+
+    /* scope_id used for transport, scope used by sinks */
+    const char *scope;
+    i64         scope_id;
+
+    /* fmt and kv fields */
+    cr_log_field fields[CR_LOG_ITEM_FIELDS];
+
+    /* Arena used for safe string field transport */
+    char *arena_ptr;
+    char  arena[cr_log__buffer_size];
+};
+
+/* struct cr_log_capture
+ * Captured when calling cr_log,
+ * temporary till item is safely copied after claiming queue slot
+ */
+typedef struct cr_log_capture {
+    u8              level;
+    const char     *message;
+    struct timespec time;
+
+    u32         line;
+    const char *filename;
+    const char *function;
+
+    const char   *scope;
+    i64           scope_id;
+    cr_log_field *fields;
+} cr_log_capture;
 
 typedef struct cr_log_queue {
     alignas(CACHE_LINE_SIZE) atomic_size_t write;
@@ -285,9 +479,16 @@ typedef struct cr_log_queue {
 
     struct {
         alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
-        struct cr_log_item meta;
-    } buffer[queue_size];
+        struct cr_log_item event;
+    } buffer[cr_log__queue_size];
 } cr_log_queue;
+
+static_assert(
+    sizeof(struct {
+        alignas(CACHE_LINE_SIZE) atomic_size_t sequence;
+        struct cr_log_item                     event;
+    }) == CR_LOG_ITEM_SIZE,
+    "cr_log_item slot size mismatch");
 
 static_assert(
     offsetof(cr_log_queue, read) == CACHE_LINE_SIZE,
@@ -333,10 +534,10 @@ typedef struct cr_log_ctx {
     alignas(CACHE_LINE_SIZE) cr_log_queue queue;
 } cr_log_ctx;
 
-typedef void (*process_fn)(cr_log_sink *sink, cr_log_item *item);
+typedef void (*cr_log_process_fn)(cr_log_sink *sink, cr_log_item *item);
 struct cr_log_sink {
     struct cr_log_sink *next;
-    process_fn          process;
+    cr_log_process_fn   process;
     cr_log_level        level;
 
     struct cr_log_transport *transports;
@@ -366,17 +567,24 @@ struct cr_log_transport_fd {
  * zone:private:declarations *
  *****************************/
 
-static cr_log_sink *cr_log__sink_new(process_fn process, usize bsize, struct cr_log_transport **transports);
+static cr_log_sink *cr_log__sink_new(cr_log_process_fn process, usize bsize, struct cr_log_transport **transports);
 static void         cr_log__sink_free(cr_log_sink *sink);
-static i32          cr_log__sink_flush(cr_log_sink *sink);
+static inline i32   cr_log__sink_flush(cr_log_sink *sink);
 
-static i32 cr_log__sink_write(cr_log_sink *sink, const void *src, usize size);
-static i32 cr_log__sink_str(cr_log_sink *sink, const char *str);
-static i32 cr_log__sink_u64(cr_log_sink *sink, u64 value);
-static i32 cr_log__sink_i64(cr_log_sink *sink, i64 value);
+static inline i32 cr_log__sink_write(cr_log_sink *sink, const void *src, usize size);
+static inline i32 cr_log__sink_str(cr_log_sink *sink, const char *str);
+static i32        cr_log__sink_u64(cr_log_sink *sink, u64 value);
+static i32        cr_log__sink_i64(cr_log_sink *sink, i64 value);
+static inline i32 cr_log__sink_bool(cr_log_sink *sink, b8 value);
 
 static inline char *cr_log__sink_reserve(cr_log_sink *sink, usize size);
 static inline void  cr_log__sink_advance(cr_log_sink *sink, usize size);
+
+// format item->message using format fields
+static inline void cr_log__sink_message(cr_log_sink *sink, const cr_log_item *item);
+
+// auto select appropriate cr_log__sink_* according field->type
+static inline i32 cr_log__sink_value(cr_log_sink *sink, const cr_log_field *field);
 
 static void cr_log__sink_text_process(cr_log_sink *sink, cr_log_item *item);
 
@@ -385,15 +593,20 @@ static int cr_log__transport_fd_close(cr_log_transport *transport);
 
 static int cr_log__transport_file_close(cr_log_transport *transport);
 
-static int   enqueue(cr_log_ctx *ctx, struct cr_log_item meta);
-static void *dequeue(void *arg);
-static void  queue_consumer(cr_log_ctx *ctx, struct cr_log_item *item);
+static int          cr_log__try_enqueue(cr_log_ctx *ctx, cr_log_capture *event);
+static int          cr_log__enqueue(cr_log_ctx *ctx, cr_log_capture *event);
+static inline char *cr_log__item_strdup(cr_log_item *item, const char *str);
+static int          cr_log__item_copy(cr_log_item *target, const cr_log_capture *source);
+
+static int   cr_log__try_dequeue(cr_log_ctx *ctx);
+static void *cr_log__dequeue(void *arg);
+static void  cr_log__consume(cr_log_ctx *ctx, struct cr_log_item *item);
 
 /************************
  * zone:private:statics *
  ************************/
 
-cr_log_ctx *global_ctx;
+cr_log_ctx *cr_log_global_ctx;
 
 // clang-format off
 static const char* cr_log_reset    = "\x1b[0m";
@@ -416,24 +629,24 @@ static const char* cr_log_level_names[] = {
 // clang-format on
 
 #ifdef CR_LOG_TELEMETRY
-alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t drop_count;
+alignas(CACHE_LINE_SIZE) atomic_uint_fast64_t cr_log__drop_count;
 #endif
 
 // monotonic instance id counter
-static atomic_uint_fast16_t instance_id_counter = 0;
+static atomic_uint_fast16_t cr_log__instance_counter = 0;
 
 // per thread scope id storage
 // id is a index into the per-instance intern table
 thread_local struct {
     uint16_t scope_id;
-} per_instance_scope[CR_LOG_MAX_INSTANCES];
+} cr_log__per_instance_scope[CR_LOG_MAX_INSTANCES];
 
-static struct cr_log_transport_ops fd_ops = {
+static struct cr_log_transport_ops cr_log__fd_ops = {
     .write = cr_log__transport_fd_write,
     .close = cr_log__transport_fd_close,
 };
 
-static struct cr_log_transport_ops file_ops = {
+static struct cr_log_transport_ops cr_log__file_ops = {
     .write = cr_log__transport_fd_write,
     .close = cr_log__transport_file_close,
 };
@@ -443,7 +656,7 @@ static struct cr_log_transport_ops file_ops = {
  ************************/
 
 // NOLINTBEGIN(readability-magic-numbers)
-static const u64 pow10_table[] = {
+static const u64 cr_log__pow10_lut[] = {
     1ULL,                   // 10^0
     10ULL,                  // 10^1
     100ULL,                 // 10^2
@@ -468,19 +681,35 @@ static const u64 pow10_table[] = {
 
 //! x => floor(log10(x))
 static inline u8
-fast_log10(u64 value)
+cr_log__log10(u64 value)
 {
     //! x  =>  floor(floor(log2(x)) * log10(2))
     u8 guess = ((63 - (u8)__builtin_clzll(value | 1ULL)) * 1233) >> 12;
     u8 next  = guess + (guess < 19);
-    return guess + (value >= pow10_table[next]);
+    return guess + (value >= cr_log__pow10_lut[next]);
 }
 
 static inline u64
-fast_abs(i64 value)
+cr_log__abs(i64 value)
 {
     u64 mask = (u64)value >> 63;
     return ((u64)value + mask) ^ mask;
+}
+
+#define FNV1A_64_PRIME  0x00000100000001b3ULL
+#define FNV1A_64_OFFSET 0xcbf29ce484222325ULL
+
+static inline uint64_t
+cr_log__hash_string(const char *_key)
+{
+    u8 *key  = (u8 *)_key;
+    u64 hash = FNV1A_64_OFFSET;
+    while (*key) {
+        hash ^= *key++;
+        hash *= FNV1A_64_PRIME;
+    }
+
+    return hash;
 }
 // NOLINTEND(readability-magic-numbers)
 
@@ -496,7 +725,7 @@ cr_log_new_ctx()
         return NULL;
     }
 
-    ctx->instance_id = atomic_fetch_add_explicit(&instance_id_counter, 1, memory_order_relaxed);
+    ctx->instance_id = atomic_fetch_add_explicit(&cr_log__instance_counter, 1, memory_order_relaxed);
     ctx->level       = CR_LOG_LEVEL_INFO;
     atomic_store_relaxed(&ctx->state, true);
     ctx->sinks_head = nullptr;
@@ -514,14 +743,14 @@ cr_log_new_ctx()
     }
 
     // queue
-    for (usize i = 0; i < queue_size; i++) {
+    for (usize i = 0; i < cr_log__queue_size; i++) {
         atomic_init(&ctx->queue.buffer[i].sequence, i);
     }
-    ctx->queue.mask = queue_size - 1;
+    ctx->queue.mask = cr_log__queue_size - 1;
     atomic_init(&ctx->queue.read, 0);
     atomic_init(&ctx->queue.write, 0);
     sem_init(&ctx->queue.items, 0, 0);
-    pthread_create(&ctx->consumer, NULL, dequeue, ctx);
+    pthread_create(&ctx->consumer, NULL, cr_log__dequeue, ctx);
 
     return ctx;
 }
@@ -590,8 +819,61 @@ cr_log_destory_ctx(cr_log_ctx *ctx)
     free(ctx);
 }
 
-int
-try_enqueue(cr_log_ctx *ctx, struct cr_log_item *meta)
+static inline char *
+cr_log__item_strdup(cr_log_item *item, const char *str)
+{
+    usize len = strlen(str) + 1; // adjust for '\0'
+    if (cr_log__likely(item->arena_ptr + len <= item->arena + cr_log__buffer_size)) {
+        char *copy = memcpy(item->arena_ptr, str, len);
+        item->arena_ptr += len;
+        return copy;
+    }
+    return NULL;
+}
+
+static int
+cr_log__item_copy(cr_log_item *target, const cr_log_capture *source)
+{
+    int err = 0;
+
+    target->level    = source->level;
+    target->message  = source->message;
+    target->time     = source->time;
+    target->line     = source->line;
+    target->filename = source->filename;
+    target->function = source->function;
+    target->scope_id = source->scope_id;
+
+    // init arena
+    target->arena_ptr = target->arena;
+
+    // copy fields
+    for (usize i = 0; i < CR_LOG_ITEM_FIELDS; i++) {
+        cr_log_field *source_field = source->fields + i;
+        if (!source_field || source_field->type == CR_LOG_TYPE_NONE) {
+            // sentinel value
+            break;
+        }
+
+        cr_log_field *target_field = target->fields + i;
+        target_field->name         = source_field->name;
+        target_field->type         = source_field->type;
+        target_field->value        = source_field->value;
+
+        if (source_field->type == CR_LOG_TYPE_STRING && !err) {
+            // safely copy string value (using arena)
+            target_field->value.s = cr_log__item_strdup(target, source_field->value.s);
+            if (target_field->value.s == nullptr) {
+                err = 1;
+            }
+        }
+    }
+
+    return err;
+}
+
+static int
+cr_log__try_enqueue(cr_log_ctx *ctx, cr_log_capture *event)
 {
     for (;;) {
         usize write_pos = atomic_load_relaxed(&ctx->queue.write);
@@ -602,8 +884,10 @@ try_enqueue(cr_log_ctx *ctx, struct cr_log_item *meta)
         if (write_pos - seq == 0) {
             // available, try cas
             if (atomic_cas(&ctx->queue.write, &write_pos, write_pos + 1)) {
-                // claimed
-                ctx->queue.buffer[idx].meta = *meta;
+                // claimed, write
+                cr_log__item_copy(&ctx->queue.buffer[idx].event, event);
+
+                // finish
                 atomic_store_release(&ctx->queue.buffer[idx].sequence, write_pos + 1);
                 sem_post(&ctx->queue.items);
                 return 0;
@@ -619,12 +903,12 @@ try_enqueue(cr_log_ctx *ctx, struct cr_log_item *meta)
 }
 
 int
-enqueue(cr_log_ctx *ctx, struct cr_log_item meta)
+cr_log__enqueue(cr_log_ctx *ctx, cr_log_capture *event)
 {
     i32 backoff = 1;
 
     for (int i = 0; i < CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS; i++) {
-        i32 ret = try_enqueue(ctx, &meta);
+        i32 ret = cr_log__try_enqueue(ctx, event);
         if (ret == 0) {
             return 0;
         }
@@ -645,8 +929,8 @@ enqueue(cr_log_ctx *ctx, struct cr_log_item meta)
     return -1;
 }
 
-int
-try_dequeue(cr_log_ctx *ctx)
+static int
+cr_log__try_dequeue(cr_log_ctx *ctx)
 {
     usize read_pos = atomic_load_relaxed(&ctx->queue.read);
     usize idx      = read_pos & ctx->queue.mask;
@@ -655,10 +939,10 @@ try_dequeue(cr_log_ctx *ctx)
 
     if (diff == 0) {
         // consume
-        queue_consumer(ctx, &ctx->queue.buffer[idx].meta);
+        cr_log__consume(ctx, &ctx->queue.buffer[idx].event);
 
         // release
-        atomic_store_relaxed(&ctx->queue.buffer[idx].sequence, read_pos + queue_size);
+        atomic_store_relaxed(&ctx->queue.buffer[idx].sequence, read_pos + cr_log__queue_size);
         atomic_store_relaxed(&ctx->queue.read, read_pos + 1);
 
         return 0;
@@ -668,12 +952,12 @@ try_dequeue(cr_log_ctx *ctx)
 }
 
 void *
-dequeue([[maybe_unused]] void *arg)
+cr_log__dequeue(void *arg)
 {
     cr_log_ctx *ctx = (cr_log_ctx *)arg;
     for (;;) {
         sem_wait(&ctx->queue.items);
-        while (try_dequeue(ctx) == 0) {
+        while (cr_log__try_dequeue(ctx) == 0) {
             if (sem_trywait(&ctx->queue.items) != 0) {
                 break;
             }
@@ -681,12 +965,48 @@ dequeue([[maybe_unused]] void *arg)
 
         // drain on shutdown
         if (!atomic_load_relaxed(&ctx->state)) {
-            while (try_dequeue(ctx) == 0) { }
+            while (cr_log__try_dequeue(ctx) == 0) { }
             break;
         }
     }
 
     return NULL;
+}
+
+cr_log_field
+cr_log_i64(i64 value)
+{
+    return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_I64, .value.i = value };
+}
+
+cr_log_field
+cr_log_u64(u64 value)
+{
+    return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_U64, .value.u = value };
+}
+
+cr_log_field
+cr_log_bool(bool value)
+{
+    return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_BOOL, .value.b = value };
+}
+
+cr_log_field
+cr_log_str(const char *value)
+{
+    return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_STRING, .value.s = value };
+}
+
+inline cr_log_field
+cr_log_kv(const char *key, cr_log_field value)
+{
+    return (cr_log_field) { .name = key, .type = value.type, .value = value.value };
+}
+
+inline cr_log_field
+cr_log_pass(cr_log_field value)
+{
+    return value;
 }
 
 #ifdef CR_LOG_TELEMETRY
@@ -698,55 +1018,38 @@ cr_log_get_dropped_ctx(cr_log_ctx *ctx)
 #endif
 
 void
-cr_log(cr_log_ctx *ctx, cr_log_level level, const char *file, i32 line, const char *func, const char *fmt, ...)
+cr_log_submit(
+    cr_log_ctx   *ctx,
+    cr_log_level  level,
+    const char   *file,
+    i32           line,
+    const char   *func,
+    const char   *message,
+    cr_log_field *fields)
 {
     // runtime purge
     if (level < ctx->level) {
         return;
     }
-
-    // clang-format off
-    cr_log_item event = {
-        .level     = level,
-        .time = { 0 },
-        .filename  = file,
-        .line      = (u32)line,
-        .function  = func,
-        .scope_id = per_instance_scope[ctx->instance_id].scope_id
-    };
-    // clang-format on
+    cr_log_capture event = { .level    = level,
+                             .time     = { 0 },
+                             .filename = file,
+                             .line     = (u32)line,
+                             .function = func,
+                             .scope_id = cr_log__per_instance_scope[ctx->instance_id].scope_id,
+                             .message  = message,
+                             .fields   = fields };
 
     clock_gettime(CLOCK_REALTIME_COARSE, &event.time);
 
-    va_list args;
-    va_start(args, fmt);
-    (void)vsnprintf(event.buffer, buffer_size, fmt, args);
-    va_end(args);
-
-    enqueue(ctx, event);
+    cr_log__enqueue(ctx, &event);
 }
 
 // * Scope
-#define FNV1A_64_PRIME  0x00000100000001b3ULL
-#define FNV1A_64_OFFSET 0xcbf29ce484222325ULL
-
-static inline uint64_t
-hash_string(const char *_key)
-{
-    u8 *key  = (u8 *)_key;
-    u64 hash = FNV1A_64_OFFSET;
-    while (*key) {
-        hash ^= *key++;
-        hash *= FNV1A_64_PRIME;
-    }
-
-    return hash;
-}
-
 void
 cr_log_scope_set_ctx(cr_log_ctx *ctx, const char *scope)
 {
-    auto     hash = hash_string(scope);
+    auto     hash = cr_log__hash_string(scope);
     uint16_t idx  = hash & ctx->itable.mask;
 
     pthread_mutex_lock(&ctx->itable.write_lock);
@@ -757,29 +1060,29 @@ cr_log_scope_set_ctx(cr_log_ctx *ctx, const char *scope)
         if (idx != 0 && !entry->used) {
             entry->key = strdup(scope);
             if (!entry->key) {
-                per_instance_scope[ctx->instance_id].scope_id = 0;
+                cr_log__per_instance_scope[ctx->instance_id].scope_id = 0;
                 goto cleanup;
             }
 
-            entry->used                                   = true;
-            entry->hash                                   = hash;
-            per_instance_scope[ctx->instance_id].scope_id = idx;
+            entry->used                                           = true;
+            entry->hash                                           = hash;
+            cr_log__per_instance_scope[ctx->instance_id].scope_id = idx;
             goto cleanup;
         } else if (entry->hash == hash && strcmp(entry->key, scope) == 0) {
-            per_instance_scope[ctx->instance_id].scope_id = idx;
+            cr_log__per_instance_scope[ctx->instance_id].scope_id = idx;
             goto cleanup;
         } else {
             idx = (idx + 1) & ctx->itable.mask;
         }
     }
-    per_instance_scope[ctx->instance_id].scope_id = 0;
+    cr_log__per_instance_scope[ctx->instance_id].scope_id = 0;
 
 cleanup:
     pthread_mutex_unlock(&ctx->itable.write_lock);
 }
 
 static inline const char *
-scope_get(cr_log_ctx *ctx, int64_t sid)
+cr_log__scope_get(cr_log_ctx *ctx, int64_t sid)
 {
     if (sid == -1) {
         return "";
@@ -789,9 +1092,9 @@ scope_get(cr_log_ctx *ctx, int64_t sid)
 }
 
 void
-queue_consumer(cr_log_ctx *ctx, struct cr_log_item *item)
+cr_log__consume(cr_log_ctx *ctx, struct cr_log_item *item)
 {
-    item->scope = scope_get(ctx, item->scope_id);
+    item->scope = cr_log__scope_get(ctx, item->scope_id);
 
     cr_log_sink *sink = ctx->sinks_head;
     while (sink != NULL) {
@@ -803,7 +1106,7 @@ queue_consumer(cr_log_ctx *ctx, struct cr_log_item *item)
 }
 
 static cr_log_sink *
-cr_log__sink_new(process_fn process, usize bsize, struct cr_log_transport *transports[])
+cr_log__sink_new(cr_log_process_fn process, usize bsize, struct cr_log_transport *transports[])
 {
     cr_log_sink *sink = calloc(1, sizeof(cr_log_sink));
     if (sink == NULL) {
@@ -867,7 +1170,7 @@ cr_log__sink_reserve(cr_log_sink *sink, usize size)
         return nullptr;
     }
 
-    if (likely(sink->bpos + size <= sink->bsize)) {
+    if (cr_log__likely(sink->bpos + size <= sink->bsize)) {
         return sink->buffer + sink->bpos;
     }
 
@@ -888,11 +1191,11 @@ cr_log__sink_advance(cr_log_sink *sink, usize size)
     sink->bpos += size;
 }
 
-static i32
+static inline i32
 cr_log__sink_write(cr_log_sink *sink, const void *src, usize size)
 {
     char *dst = cr_log__sink_reserve(sink, size);
-    if (likely(dst)) {
+    if (cr_log__likely(dst)) {
         memcpy(dst, src, size);
         cr_log__sink_advance(sink, size);
     } else {
@@ -906,29 +1209,29 @@ cr_log__sink_write(cr_log_sink *sink, const void *src, usize size)
     return 0;
 }
 
-static i32
+static inline i32
 cr_log__sink_str(cr_log_sink *sink, const char *str)
 {
     return cr_log__sink_write(sink, str, strlen(str));
 }
 
 // NOLINTBEGIN(readability-magic-numbers)
-static const char digit_pairs[] = "00010203040506070809"
-                                  "10111213141516171819"
-                                  "20212223242526272829"
-                                  "30313233343536373839"
-                                  "40414243444546474849"
-                                  "50515253545556575859"
-                                  "60616263646566676869"
-                                  "70717273747576777879"
-                                  "80818283848586878889"
-                                  "90919293949596979899";
+static const char cr_log__digit_lut[] = "00010203040506070809"
+                                        "10111213141516171819"
+                                        "20212223242526272829"
+                                        "30313233343536373839"
+                                        "40414243444546474849"
+                                        "50515253545556575859"
+                                        "60616263646566676869"
+                                        "70717273747576777879"
+                                        "80818283848586878889"
+                                        "90919293949596979899";
 static i32
 cr_log__sink_u64(cr_log_sink *sink, u64 value)
 {
     char stack_buffer[32];
     // adjust to account for fast_log10 flooring
-    u8    len     = fast_log10(value) + 1;
+    u8    len     = cr_log__log10(value) + 1;
     char *ibuffer = cr_log__sink_reserve(sink, len);
 
     if (!ibuffer) {
@@ -948,8 +1251,8 @@ cr_log__sink_u64(cr_log_sink *sink, u64 value)
         rem *= 2;
 
         idx -= 2;
-        idx[0] = digit_pairs[rem];
-        idx[1] = digit_pairs[rem + 1];
+        idx[0] = cr_log__digit_lut[rem];
+        idx[1] = cr_log__digit_lut[rem + 1];
     }
 
     if (value > 0) {
@@ -969,9 +1272,9 @@ static i32
 cr_log__sink_i64(cr_log_sink *sink, i64 value)
 {
     char stack_buffer[32];
-    u64  uvalue = fast_abs(value);
+    u64  uvalue = cr_log__abs(value);
     // adjust to account for fast_log10 flooring and sign bit
-    u8    len     = fast_log10(uvalue) + 1 + (value < 0);
+    u8    len     = cr_log__log10(uvalue) + 1 + (value < 0);
     char *ibuffer = cr_log__sink_reserve(sink, len);
 
     if (!ibuffer) {
@@ -991,8 +1294,8 @@ cr_log__sink_i64(cr_log_sink *sink, i64 value)
         rem *= 2;
 
         idx -= 2;
-        idx[0] = digit_pairs[rem];
-        idx[1] = digit_pairs[rem + 1];
+        idx[0] = cr_log__digit_lut[rem];
+        idx[1] = cr_log__digit_lut[rem + 1];
     }
 
     if (uvalue > 0) {
@@ -1011,7 +1314,82 @@ commit:
     cr_log__sink_advance(sink, len);
     return 0;
 }
+
+static inline i32
+cr_log__sink_bool(cr_log_sink *sink, b8 value)
+{
+    if (value) {
+        cr_log__sink_write(sink, "true", 4);
+    } else {
+        cr_log__sink_write(sink, "false", 5);
+    }
+
+    return 0;
+}
+
 // NOLINTEND(readability-magic-numbers)
+
+static inline i32
+cr_log__sink_value(cr_log_sink *sink, const cr_log_field *field)
+{
+    switch (field->type) {
+    case CR_LOG_TYPE_U64:
+        return cr_log__sink_u64(sink, field->value.u);
+    case CR_LOG_TYPE_I64:
+        return cr_log__sink_i64(sink, field->value.i);
+    case CR_LOG_TYPE_BOOL:
+        return cr_log__sink_bool(sink, field->value.b);
+    case CR_LOG_TYPE_STRING:
+        return cr_log__sink_str(sink, field->value.s);
+
+    default:
+        return -1;
+    }
+}
+
+static inline void
+cr_log__sink_message(cr_log_sink *sink, const cr_log_item *item)
+{
+    usize len = strlen(item->message);
+
+    // current selected substring
+    usize start = 0;
+    usize end   = 0;
+
+    const cr_log_field *field = item->fields;
+
+    while (end < len) {
+        if (item->message[end] != '{') {
+            end++;
+            continue;
+        }
+
+        // found '{', find possible '}'
+        if (end + 1 < len && item->message[end + 1] == '}') {
+            // write till '{'
+            cr_log__sink_write(sink, item->message + start, end - start);
+
+            // select next format field if possible
+            if (field - item->fields < CR_LOG_ITEM_FIELDS && field->name != nullptr) {
+                while (field - item->fields < CR_LOG_ITEM_FIELDS && field->name != nullptr) {
+                    field++;
+                }
+            }
+
+            cr_log__sink_value(sink, field);
+            field++;
+
+            // skip {} and advance
+            end += 2;
+            start = end;
+        }
+    }
+
+    // write remaining, if any
+    if (start < end) {
+        cr_log__sink_write(sink, item->message + start, end - start);
+    }
+}
 
 static void
 cr_log__sink_text_process(cr_log_sink *sink, cr_log_item *item)
@@ -1035,8 +1413,24 @@ cr_log__sink_text_process(cr_log_sink *sink, cr_log_item *item)
     cr_log__sink_write(sink, " ", 1);
     cr_log__sink_str(sink, item->function);
     cr_log__sink_write(sink, "] ", 2);
-    cr_log__sink_str(sink, item->buffer);
+
+    // print formatted message
+    cr_log__sink_message(sink, item);
+
+    // key value pairs
+    cr_log__iter_field(item->fields, field)
+    {
+        // filter kv pairs
+        if (field->name != nullptr) {
+            cr_log__sink_write(sink, " ", 1);
+            cr_log__sink_str(sink, field->name);
+            cr_log__sink_write(sink, "=", 1);
+            cr_log__sink_value(sink, field);
+        }
+    }
+
     cr_log__sink_write(sink, "\n", 1);
+
     // NOLINTEND(readability-magic-numbers)
 }
 
@@ -1053,7 +1447,7 @@ cr_log_transport_fd(int fd)
     if (transport == NULL) {
         return NULL;
     }
-    transport->base.ops = &fd_ops;
+    transport->base.ops = &cr_log__fd_ops;
     transport->fd       = fd;
 
     return (cr_log_transport *)transport;
@@ -1088,7 +1482,7 @@ cr_log_transport_file(const char *file, int flags)
 {
     int               fd        = open(file, flags, 0644);
     cr_log_transport *transport = cr_log_transport_fd(fd);
-    transport->ops              = &file_ops;
+    transport->ops              = &cr_log__file_ops;
     return transport;
 }
 
@@ -1099,61 +1493,58 @@ cr_log__transport_file_close(cr_log_transport *transport)
     return 0;
 }
 
-// }}}
-// }}}
-
 #endif // CR_LOG_IMPL
 #endif // CR_LOG_H
 
-/*
-This is a single header library that provides logging functions.
-This is part of the Corrosive library.
+/*******************************************************************************
 
-To use this library, do this in *one* of your source files:
-    #define CR_LOG_IMPL
-    #include "cr_log.h"
+- Compile time options
 
-Table Of Contents
-    Compile time options
-    Documentation
-    Examples
-    License
-    Credits
+    CR_LOG_PURGE_LEVEL (default: 0 aka CR_LOG_LEVEL_TRACE)
+        Set this to appropriate CR_LOG_LEVEL_* to purge log function calls.
+        Any log of a lower level is replaced by a (void(0)).
+        Therefore, no runtime overhead.
 
-Compile time options
-        CR_LOG_PURGE_LEVEL
-                Set this to appropriate CR_LOG_LEVEL_* to purge log function calls.
-                Any log of a lower level is replaced by a (void(0)).
-                Therefore, no runtime overhead.
-        CR_LOG_ITABLE_SIZE
-                Used to set the size of intern table inside all the contexts.
-                Only nessecary if you set scopes frequently (default size is 256).
-        CR_LOG_QUEUE_SIZE
-                Size of the internal queue used to asyncronously dispatch log calls.
-                Only tune this if you are working under extreme multithreadedthread load.
-                The default value is usually more than enough.
-                Profile using CR_LOG_TELEMETRY to see dropped items.
-        CR_LOG_QUEUE_ITEM_SIZE
-                Controls the size of individual items in queue.
-        CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS
-                Max attempts to enqueue an item before dropping it.
-        CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF
-                Used to clamp backoff spin timing.
-        CR_LOG_MAX_INSTANCES
-                This controls the upper limit on how many context can be created during app lifetime.
-                This is necessary as this sets the size of how many scope_id to value any thread can handle.
-                A value of 16 means, there can be total 16 context (including global one).
-                Internally each context gets a monotonic context id,
-                Which is used to look up what scope is set for any context per thread.
-                Higher value will increase memory overhead per thread.
+    CR_LOG_MAX_INSTANCES (default: 16)
+        This controls the upper limit on how many context can be created during app lifetime.
+        This is necessary as this sets the size of how many scope_id to value any thread can handle.
+        A value of 16 means, there can be total 16 context (including global one).
+        Internally each context gets a monotonic context id,
+        Which is used to look up what scope is set for any context per thread.
+        Higher value will increase memory overhead per thread.
 
-Documentation
-        To be added.
+    CR_LOG_ITEM_SIZE (default: 2^9 aka 512)
+        Controls the size of individual items in queue.
 
-Examples
-        To be added.
+    CR_LOG_ITEM_FIELDS (default: 8)
+        Max capacity of each log item to hold fields.
+        Fields can be either format parameter or key-value pair.
+        Excess fields will be dropped.
 
-MIT License
+    CR_LOG_QUEUE_SIZE (default: 2^12 aka 4096)
+        Size of the internal queue used to asyncronously dispatch log calls.
+        Only tune this if you are working under extreme multithreadedthread load.
+        The default value is usually more than enough.
+        Profile using CR_LOG_TELEMETRY to see dropped items.
+
+    CR_LOG_ITABLE_SIZE (default: 2^8 aka 256)
+        Used to set the size of intern table inside all the contexts.
+        Only nessecary if you set scopes frequently (default size is 256).
+        NOTE: max safe value is 1<<16 (limited by the capacity of uint16_t)
+
+    CR_LOG_QUEUE_MAX_ENQUEUE_ATTEMPTS (default: 2^7 aka 128)
+        Max attempts to enqueue an item before dropping it.
+
+    CR_LOG_QUEUE_MAX_ENQUEUE_BACKOFF (default: 2^10 aka 1024)
+        Used to clamp backoff spin timing.
+
+- Documentation
+    To be added.
+
+- Examples
+    To be added.
+
+- MIT License
     Copyright (c) 2026 Praise Jacob <iampraisejacob@gmail.com>
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -1177,4 +1568,5 @@ MIT License
 Credits
     Praise Jacob 	library API/implementation
     Sean Barret 	built STB which inspired this library
- */
+
+*******************************************************************************/
