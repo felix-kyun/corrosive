@@ -375,6 +375,11 @@ typedef ptrdiff_t isize;
         (void)fprintf(stderr, (fmt), ##__VA_ARGS__);                                                                   \
     } while (0)
 
+#define cr_log__iter_field(field_arr, label)                                                                           \
+    for (cr_log_field * (label) = field_arr;                                                                           \
+         (label) - (field_arr) < CR_LOG_ITEM_FIELDS && (label)->type != CR_LOG_TYPE_NONE;                              \
+         (label)++)
+
 #define atomic_load_relaxed(target)         atomic_load_explicit(target, memory_order_relaxed)
 #define atomic_load_acquire(target)         atomic_load_explicit(target, memory_order_acquire)
 #define atomic_store_relaxed(target, value) atomic_store_explicit(target, value, memory_order_relaxed)
@@ -564,19 +569,22 @@ struct cr_log_transport_fd {
 
 static cr_log_sink *cr_log__sink_new(cr_log_process_fn process, usize bsize, struct cr_log_transport **transports);
 static void         cr_log__sink_free(cr_log_sink *sink);
-static i32          cr_log__sink_flush(cr_log_sink *sink);
+static inline i32   cr_log__sink_flush(cr_log_sink *sink);
 
-static i32 cr_log__sink_write(cr_log_sink *sink, const void *src, usize size);
-static i32 cr_log__sink_str(cr_log_sink *sink, const char *str);
-static i32 cr_log__sink_u64(cr_log_sink *sink, u64 value);
-static i32 cr_log__sink_i64(cr_log_sink *sink, i64 value);
-static i32 cr_log__sink_bool(cr_log_sink *sink, b8 value);
+static inline i32 cr_log__sink_write(cr_log_sink *sink, const void *src, usize size);
+static inline i32 cr_log__sink_str(cr_log_sink *sink, const char *str);
+static i32        cr_log__sink_u64(cr_log_sink *sink, u64 value);
+static i32        cr_log__sink_i64(cr_log_sink *sink, i64 value);
+static inline i32 cr_log__sink_bool(cr_log_sink *sink, b8 value);
 
 static inline char *cr_log__sink_reserve(cr_log_sink *sink, usize size);
 static inline void  cr_log__sink_advance(cr_log_sink *sink, usize size);
 
-static inline void cr_log__sink_fmt_write(cr_log_sink *sink, const cr_log_item *item);
-static inline void cr_log__sink_write_fmt_field(cr_log_sink *sink, const cr_log_field *field);
+// format item->message using format fields
+static inline void cr_log__sink_message(cr_log_sink *sink, const cr_log_item *item);
+
+// auto select appropriate cr_log__sink_* according field->type
+static inline i32 cr_log__sink_value(cr_log_sink *sink, const cr_log_field *field);
 
 static void cr_log__sink_text_process(cr_log_sink *sink, cr_log_item *item);
 
@@ -704,52 +712,6 @@ cr_log__hash_string(const char *_key)
     return hash;
 }
 // NOLINTEND(readability-magic-numbers)
-
-static inline void
-cr_log__next_fmt_field(const cr_log_field *fields, const cr_log_field **current)
-{
-
-    // init if required
-    if (*current == nullptr) {
-        *current = fields;
-    } else if (*current - fields + 1 < CR_LOG_ITEM_FIELDS) {
-        // advance to next
-        (*current)++;
-    }
-
-    // find next
-    while (*current - fields + 1 < CR_LOG_ITEM_FIELDS && (*current)->type != CR_LOG_TYPE_NONE
-           && (*current)->name != nullptr) {
-        (*current)++;
-    }
-}
-
-static inline void
-cr_log__sink_write_fmt_field(cr_log_sink *sink, const cr_log_field *field)
-{
-    // reject kv fields
-    if (field == nullptr || field->name != nullptr) {
-        return;
-    }
-
-    switch (field->type) {
-    case CR_LOG_TYPE_U64:
-        cr_log__sink_u64(sink, field->value.u);
-        break;
-    case CR_LOG_TYPE_I64:
-        cr_log__sink_i64(sink, field->value.i);
-        break;
-    case CR_LOG_TYPE_BOOL:
-        cr_log__sink_bool(sink, field->value.b);
-        break;
-    case CR_LOG_TYPE_STRING:
-        cr_log__sink_str(sink, field->value.s);
-        break;
-
-    default:
-        break;
-    }
-}
 
 /****************************
  * zone:private:definitions *
@@ -1229,7 +1191,7 @@ cr_log__sink_advance(cr_log_sink *sink, usize size)
     sink->bpos += size;
 }
 
-static i32
+static inline i32
 cr_log__sink_write(cr_log_sink *sink, const void *src, usize size)
 {
     char *dst = cr_log__sink_reserve(sink, size);
@@ -1247,7 +1209,7 @@ cr_log__sink_write(cr_log_sink *sink, const void *src, usize size)
     return 0;
 }
 
-static i32
+static inline i32
 cr_log__sink_str(cr_log_sink *sink, const char *str)
 {
     return cr_log__sink_write(sink, str, strlen(str));
@@ -1353,7 +1315,7 @@ commit:
     return 0;
 }
 
-static i32
+static inline i32
 cr_log__sink_bool(cr_log_sink *sink, b8 value)
 {
     if (value) {
@@ -1367,19 +1329,35 @@ cr_log__sink_bool(cr_log_sink *sink, b8 value)
 
 // NOLINTEND(readability-magic-numbers)
 
+static inline i32
+cr_log__sink_value(cr_log_sink *sink, const cr_log_field *field)
+{
+    switch (field->type) {
+    case CR_LOG_TYPE_U64:
+        return cr_log__sink_u64(sink, field->value.u);
+    case CR_LOG_TYPE_I64:
+        return cr_log__sink_i64(sink, field->value.i);
+    case CR_LOG_TYPE_BOOL:
+        return cr_log__sink_bool(sink, field->value.b);
+    case CR_LOG_TYPE_STRING:
+        return cr_log__sink_str(sink, field->value.s);
+
+    default:
+        return -1;
+    }
+}
+
 static inline void
-cr_log__sink_fmt_write(cr_log_sink *sink, const cr_log_item *item)
+cr_log__sink_message(cr_log_sink *sink, const cr_log_item *item)
 {
     usize len = strlen(item->message);
 
-    // string tracking
+    // current selected substring
     usize start = 0;
     usize end   = 0;
 
-    // field tracking
-    const cr_log_field *field = nullptr;
+    const cr_log_field *field = item->fields;
 
-    // 2 pointer scan
     while (end < len) {
         if (item->message[end] != '{') {
             end++;
@@ -1391,16 +1369,19 @@ cr_log__sink_fmt_write(cr_log_sink *sink, const cr_log_item *item)
             // write till '{'
             cr_log__sink_write(sink, item->message + start, end - start);
 
-            // select next formattable field
-            cr_log__next_fmt_field(item->fields, &field);
-            if (field != nullptr) {
-                cr_log__sink_write_fmt_field(sink, field);
+            // select next format field if possible
+            if (field - item->fields < CR_LOG_ITEM_FIELDS && field->name != nullptr) {
+                while (field - item->fields < CR_LOG_ITEM_FIELDS && field->name != nullptr) {
+                    field++;
+                }
             }
 
-            // advance
+            cr_log__sink_value(sink, field);
+            field++;
+
+            // skip {} and advance
             end += 2;
             start = end;
-            continue;
         }
     }
 
@@ -1433,9 +1414,23 @@ cr_log__sink_text_process(cr_log_sink *sink, cr_log_item *item)
     cr_log__sink_str(sink, item->function);
     cr_log__sink_write(sink, "] ", 2);
 
-    cr_log__sink_fmt_write(sink, item);
+    // print formatted message
+    cr_log__sink_message(sink, item);
+
+    // key value pairs
+    cr_log__iter_field(item->fields, field)
+    {
+        // filter kv pairs
+        if (field->name != nullptr) {
+            cr_log__sink_write(sink, " ", 1);
+            cr_log__sink_str(sink, field->name);
+            cr_log__sink_write(sink, "=", 1);
+            cr_log__sink_value(sink, field);
+        }
+    }
 
     cr_log__sink_write(sink, "\n", 1);
+
     // NOLINTEND(readability-magic-numbers)
 }
 
