@@ -1,5 +1,5 @@
 /*
- * cr_log.h - v0.9.1 - Logging Library
+ * cr_log.h - v0.10.0 - Logging Library
  *
  * Author:   Praise Jacob <iampraisejacob@gmail.com>
  * Repo:     https://github.com/felix-kyun/corrosive
@@ -139,6 +139,7 @@
         uint16_t: cr_log_u64,                                                                                          \
         uint32_t: cr_log_u64,                                                                                          \
         uint64_t: cr_log_u64,                                                                                          \
+        float: cr_log_f32,                                                                                             \
         bool: cr_log_bool,                                                                                             \
         char *: cr_log_str,                                                                                            \
         struct cr_log_field: cr_log_pass)(v)
@@ -235,6 +236,7 @@ int  cr_log_sink_add_ctx(cr_log_ctx *ctx, cr_log_level level, cr_log_sink *sink)
 
 cr_log_field        cr_log_i64(int64_t value);
 cr_log_field        cr_log_u64(uint64_t value);
+cr_log_field        cr_log_f32(float value);
 cr_log_field        cr_log_bool(bool value);
 cr_log_field        cr_log_str(const char *value);
 inline cr_log_field cr_log_pass(cr_log_field value);
@@ -301,19 +303,20 @@ uint64_t cr_log_get_dropped_ctx(cr_log_ctx *ctx);
 // cr_types.h
 #ifndef CR_TYPES_H
 
-typedef int8_t    i8;
-typedef uint8_t   u8;
-typedef int16_t   i16;
-typedef uint16_t  u16;
-typedef int32_t   i32;
-typedef uint32_t  u32;
-typedef int64_t   i64;
-typedef uint64_t  u64;
-typedef float     f32;
-typedef double    f64;
-typedef bool      b8;
-typedef size_t    usize;
-typedef ptrdiff_t isize;
+typedef int8_t      i8;
+typedef uint8_t     u8;
+typedef int16_t     i16;
+typedef uint16_t    u16;
+typedef int32_t     i32;
+typedef uint32_t    u32;
+typedef int64_t     i64;
+typedef uint64_t    u64;
+typedef __uint128_t u128;
+typedef float       f32;
+typedef double      f64;
+typedef bool        b8;
+typedef size_t      usize;
+typedef ptrdiff_t   isize;
 
 #endif
 
@@ -396,6 +399,7 @@ enum cr_log_type {
     CR_LOG_TYPE_NONE = 0,
     CR_LOG_TYPE_U64,
     CR_LOG_TYPE_I64,
+    CR_LOG_TYPE_F32,
     CR_LOG_TYPE_BOOL,
     CR_LOG_TYPE_STRING,
 };
@@ -406,6 +410,7 @@ struct cr_log_field {
     union {
         u64         u;
         i64         i;
+        f32         f;
         b8          b;
         const char *s;
     } value;
@@ -575,6 +580,7 @@ static inline i32 cr_log__sink_write(cr_log_sink *sink, const void *src, usize s
 static inline i32 cr_log__sink_str(cr_log_sink *sink, const char *str);
 static i32        cr_log__sink_u64(cr_log_sink *sink, u64 value);
 static i32        cr_log__sink_i64(cr_log_sink *sink, i64 value);
+static i32        cr_log__sink_f32(cr_log_sink *sink, f32 value);
 static inline i32 cr_log__sink_bool(cr_log_sink *sink, b8 value);
 
 static inline char *cr_log__sink_reserve(cr_log_sink *sink, usize size);
@@ -656,44 +662,80 @@ static struct cr_log_transport_ops cr_log__file_ops = {
  ************************/
 
 // NOLINTBEGIN(readability-magic-numbers)
-static const u64 cr_log__pow10_lut[] = {
-    1ULL,                   // 10^0
-    10ULL,                  // 10^1
-    100ULL,                 // 10^2
-    1000ULL,                // 10^3
-    10000ULL,               // 10^4
-    100000ULL,              // 10^5
-    1000000ULL,             // 10^6
-    10000000ULL,            // 10^7
-    100000000ULL,           // 10^8
-    1000000000ULL,          // 10^9
-    10000000000ULL,         // 10^10
-    100000000000ULL,        // 10^11
-    1000000000000ULL,       // 10^12
-    10000000000000ULL,      // 10^13
-    100000000000000ULL,     // 10^14
-    1000000000000000ULL,    // 10^15
-    10000000000000000ULL,   // 10^16
-    100000000000000000ULL,  // 10^17
-    1000000000000000000ULL, // 10^18
-    10000000000000000000ULL // 10^19
-};
 
-//! x => floor(log10(x))
+[[__gnu__::__always_inline__]]
 static inline u8
-cr_log__log10(u64 value)
+cr_log__clz_u64(u64 value)
+{
+    return value ? (u8)__builtin_clzll(value) : 64;
+}
+
+[[__gnu__::__always_inline__]]
+static inline u8
+cr_log__clz_u128(u128 value)
+{
+    // NOLINTNEXTLINE(readability-identifier-length)
+    u64 hi = value >> 64;
+    return (hi) ? cr_log__clz_u64(hi) : 64 + cr_log__clz_u64((u64)value);
+}
+
+// floor(log2(x))
+[[__gnu__::__always_inline__]]
+static inline u8
+cr_log__log2_u64(u64 value)
+{
+    return value ? 63 - (u8)__builtin_clzll(value) : 0;
+}
+
+// floor(log2(x))
+[[__gnu__::__always_inline__]]
+static inline u8
+cr_log__log2_u128(u128 value)
+{
+    // log2(0) is not defined
+    if (!value) {
+        return 0;
+    }
+
+    return (127 - cr_log__clz_u128(value));
+}
+
+// compute lookup table for power of 10 values
+static u128 cr_log__pow10_lut[39];
+[[__gnu__::__constructor__(101)]]
+static void
+cr_log__pow10_lut_init(void)
+{
+    cr_log__pow10_lut[0] = 1;
+    //! 2^128 ≈ 3.4 * 10^38
+    for (int i = 1; i < 39; i++) {
+        cr_log__pow10_lut[i] = 10 * cr_log__pow10_lut[i - 1];
+    }
+}
+
+// floor(log10(x))
+static inline u8
+cr_log__log10_u64(u64 value)
 {
     //! x  =>  floor(floor(log2(x)) * log10(2))
-    u8 guess = ((63 - (u8)__builtin_clzll(value | 1ULL)) * 1233) >> 12;
-    u8 next  = guess + (guess < 19);
+    //! log10(2) ≈ 1233/4096
+    u8 guess = (cr_log__log2_u64(value) * 1233) >> 12;
+    return guess + (value >= (u64)cr_log__pow10_lut[guess + 1]);
+}
+
+static inline u8
+cr_log__log10_u128(__uint128_t value)
+{
+    u8 guess = (cr_log__log2_u128(value) * 1233) >> 12;
+    u8 next  = guess + (guess < 38);
     return guess + (value >= cr_log__pow10_lut[next]);
 }
 
+[[__gnu__::__always_inline__]]
 static inline u64
 cr_log__abs(i64 value)
 {
-    u64 mask = (u64)value >> 63;
-    return ((u64)value + mask) ^ mask;
+    return (value < 0) ? (u64)(-(value + 1)) + 1 : (u64)value;
 }
 
 #define FNV1A_64_PRIME  0x00000100000001b3ULL
@@ -986,6 +1028,12 @@ cr_log_u64(u64 value)
 }
 
 cr_log_field
+cr_log_f32(f32 value)
+{
+    return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_F32, .value.f = value };
+}
+
+cr_log_field
 cr_log_bool(bool value)
 {
     return (cr_log_field) { .name = nullptr, .type = CR_LOG_TYPE_BOOL, .value.b = value };
@@ -1230,8 +1278,8 @@ static i32
 cr_log__sink_u64(cr_log_sink *sink, u64 value)
 {
     char stack_buffer[32];
-    // adjust to account for fast_log10 flooring
-    u8    len     = cr_log__log10(value) + 1;
+    // log10(x) + 1 = char count
+    u8    len     = cr_log__log10_u64(value) + 1;
     char *ibuffer = cr_log__sink_reserve(sink, len);
 
     if (!ibuffer) {
@@ -1273,8 +1321,9 @@ cr_log__sink_i64(cr_log_sink *sink, i64 value)
 {
     char stack_buffer[32];
     u64  uvalue = cr_log__abs(value);
-    // adjust to account for fast_log10 flooring and sign bit
-    u8    len     = cr_log__log10(uvalue) + 1 + (value < 0);
+    // log10(x) + 1 = char count
+    // account for sign symbol
+    u8    len     = cr_log__log10_u64(uvalue) + 1 + (value < 0);
     char *ibuffer = cr_log__sink_reserve(sink, len);
 
     if (!ibuffer) {
@@ -1315,6 +1364,106 @@ commit:
     return 0;
 }
 
+union pun_cast {
+    f32 f;
+    u32 u;
+};
+
+static i32
+cr_log__sink_f32(cr_log_sink *sink, f32 value)
+{
+    /* Maximum buffer space a ieee754 f32 could take
+     * [ sign (1) | exponent (8) | mantissa (23) ]
+     * sign		: 1
+     * integer	: log10(2^(2^8)) ≈39
+     * dot 		: 1
+     * fraction	: log10(2^23) ≈ 7
+     */
+    constexpr auto max_buffer_size = 1 + 39 + 1 + 7;
+    char           stack_buffer[max_buffer_size];
+    char          *buffer = cr_log__sink_reserve(sink, max_buffer_size);
+    if (!buffer) {
+        buffer = stack_buffer;
+    }
+
+    char *bstart = buffer;
+
+    u32 num          = (union pun_cast) { .f = value }.u;
+    u32 negative     = num >> 31;
+    u32 unbiased_exp = (num >> 23) & 0xFF;
+    u32 mantissa     = num & 0x007FFFFF;
+
+    if (negative) {
+        *(buffer++) = '-';
+    }
+
+    if (unbiased_exp == 0xFF) {
+        // NOLINTNEXTLINE(bugprone-not-null-terminated-result)
+        memcpy(buffer, (mantissa == 0) ? "Inf" : "NaN", 3);
+        buffer += 3;
+        goto commit;
+    }
+
+    // 1.0101... but stored as 10101
+    u64 significand = (1ULL << 23) | mantissa;
+    // apply bias
+    i32 exp = (i32)unbiased_exp - 127;
+    // account for implicit decimal point
+    i32         shift    = exp - 23;
+    __uint128_t integer  = significand;
+    u64         fraction = 0;
+
+    if (shift >= 0) {
+        integer <<= shift;
+    } else {
+        // non zero decimal
+        integer >>= (-shift);
+        fraction = significand & ((1ULL << -shift) - 1);
+    }
+
+    // write integer part
+    u8    len = cr_log__log10_u128(integer) + 1;
+    char *idx = buffer + len;
+
+    while (integer >= 10) {
+        u64 rem = integer % 100;
+        integer /= 100;
+        rem *= 2;
+
+        idx -= 2;
+        idx[0] = cr_log__digit_lut[rem];
+        idx[1] = cr_log__digit_lut[rem + 1];
+    }
+
+    if (integer > 0) {
+        *--idx = (char)('0' + integer);
+    }
+
+    buffer += len;
+
+    // extract digit after decimal
+    if (shift < 0 && fraction != 0) {
+        *(buffer++) = '.';
+        // log10(2^23) ≈ 6.9
+        for (i32 i = 0; i < 7 && fraction; i++) {
+            // extract one digit
+            fraction *= 10;
+            u64 digit   = fraction >> (-shift);
+            *(buffer++) = (char)('0' + digit);
+
+            fraction &= ((1ULL << -shift) - 1);
+        }
+    }
+
+commit:
+    if (buffer == stack_buffer) {
+        return cr_log__sink_write(sink, bstart, (usize)(buffer - bstart));
+    }
+    cr_log__sink_advance(sink, (usize)(buffer - bstart));
+
+    return 0;
+}
+
 static inline i32
 cr_log__sink_bool(cr_log_sink *sink, b8 value)
 {
@@ -1337,6 +1486,8 @@ cr_log__sink_value(cr_log_sink *sink, const cr_log_field *field)
         return cr_log__sink_u64(sink, field->value.u);
     case CR_LOG_TYPE_I64:
         return cr_log__sink_i64(sink, field->value.i);
+    case CR_LOG_TYPE_F32:
+        return cr_log__sink_f32(sink, field->value.f);
     case CR_LOG_TYPE_BOOL:
         return cr_log__sink_bool(sink, field->value.b);
     case CR_LOG_TYPE_STRING:
